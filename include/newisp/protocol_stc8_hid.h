@@ -225,8 +225,11 @@ namespace stc {
             uint8_t  trim[3];
         };
 
-        static const FreqTrim* FindTrim(uint32_t freq) {
-            static const FreqTrim kTable[] = {
+        // The full set of frequencies with a known trim triple. ProgramOptions
+        // looks a requested frequency up here and refuses to write the option
+        // block when it is absent, so this table is also the single source for
+        // the "available frequencies" listing shown on that refusal.
+        inline static const FreqTrim kTrimTable[] = {
                 {   250000, 0x00, { 0x48, 0x20, 96 } },
                 {   500000, 0x00, { 0x48, 0x20, 48 } },
                 {  1000000, 0x00, { 0x48, 0x20, 24 } },
@@ -279,8 +282,10 @@ namespace stc {
                 { 33177600, 0x00, { 0xe9, 0x20,  1 } },
                 { 36864000, 0x00, { 0x56, 0x30,  1 } },
                 { 44236800, 0x00, { 0x9f, 0x30,  1 } }
-            };
-            for (const auto& e : kTable) {
+        };
+
+        static const FreqTrim* FindTrim(uint32_t freq) {
+            for (const auto& e : kTrimTable) {
                 if (e.freq == freq) return &e;
             }
             return nullptr;
@@ -289,18 +294,42 @@ namespace stc {
         bool ProgramOptions(stcisp::IChannel& uart, std::vector<uint8_t>& rxBuf,
             const LogFn& log) override
         {
-            // Fall back to the chip's own frequency when the UI selection has
-            // no trim entry, so the IRC is still programmed with a valid value.
+            // Refuse to program an option block whose frequency has no known
+            // trim triple: writing a guessed or placeholder trim could leave
+            // the IRC untrimmed and the part unable to start. Instead of
+            // falling back to the chip's measured clock, stop and list the
+            // frequencies that do have a measured trim so the user can pick a
+            // supported value.
             uint32_t freq = m_status.userTargetFreq ? m_status.userTargetFreq
                                                     : m_status.clockHz;
             const FreqTrim* ft = FindTrim(freq);
-            if (!ft && m_status.clockHz) {
-                freq = m_status.clockHz;
-                ft = FindTrim(freq);
-            }
-            if (!ft) {
-                log("[6/7] 没有 " + std::to_string(freq) +
-                    " Hz 对应的 trim 参数，无法写入选项字节");
+            // The vendor tool exposes a fixed set of IRC frequencies; a part
+            // can only be programmed at one of these, all in MHz. Refuse
+            // anything else and list exactly that set so the user sees the
+            // real choices.
+            static const uint32_t kHz[] = {
+                5529600u, 6000000u, 11059200u, 12000000u, 18432000u,
+                20000000u, 22118400u, 24000000u, 30000000u, 32000000u,
+                40000000u, 45000000u, 48000000u, 49152000u, 50803200u,
+                55296000u, 60000000u
+            };
+            static const char* kText[] = {
+                "5.5296", "6.000", "11.0592", "12.000", "18.432",
+                "20.000", "22.1184", "24.000", "30.000", "32.000",
+                "40.000", "45.000", "48.000", "49.152", "50.8032",
+                "55.296", "60.000"
+            };
+            bool supported = false;
+            for (uint32_t h : kHz) if (h == freq) { supported = true; break; }
+            if (!ft || !supported) {
+                std::string avail;
+                for (const char* s : kText) {
+                    if (!avail.empty()) avail += ", ";
+                    avail += s;
+                }
+                log("[6/7] 目标频率 " + std::to_string(freq) +
+                    " Hz 不在支持的 IRC 频率内，已中止写入");
+                log("[6/7] 支持频率 (MHz): " + avail);
                 return false;
             }
 
