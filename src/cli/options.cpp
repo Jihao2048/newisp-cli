@@ -112,6 +112,7 @@ namespace newisp {
             usage("", "list devices, then this help") +
             usage("list", "list serial and HID devices") +
             usage("detect [transport] [device]", "probe and identify a chip") +
+            usage("inspect -f FILE", "validate HEX and show address ranges; no device I/O") +
             usage("burn -f FILE [options] [device]", "erase, write and set options") +
             "\n"
             "Transport:\n"
@@ -124,7 +125,7 @@ namespace newisp {
             "                            friendly error naming the candidates)\n"
             "\n"
             "Programming:\n"
-            "  -f, --file FILE           Intel HEX firmware image (burn only)\n"
+            "  -f, --file FILE           Intel HEX firmware image (inspect or burn)\n"
             "  -b, --baud RATE           serial baud rate (default 115200)\n"
             "                            accepts 115200, 115.2k, 1M\n"
             "  -F, --freq HZ             target IRC frequency (default 24 MHz)\n"
@@ -191,6 +192,7 @@ namespace newisp {
         }
         if (cmd == "list")        out.command = Command::List;
         else if (cmd == "detect") out.command = Command::Detect;
+        else if (cmd == "inspect") out.command = Command::Inspect;
         else if (cmd == "burn")   out.command = Command::Burn;
         else if (cmd == "-v" || cmd == "--verbose" || cmd == "-q" ||
                  cmd == "--quiet") {
@@ -209,6 +211,13 @@ namespace newisp {
         // ---- options ----
         for (; i < argc; ++i) {
             std::string a = argv[i];
+
+            if (out.command == Command::Inspect &&
+                (a == "-b" || a == "--baud" || a == "-F" || a == "--freq" ||
+                 a == "-e" || a == "--eeprom" || a == "--clock" || a == "--family")) {
+                error = "inspect is offline; programming options are not allowed";
+                return 2;
+            }
 
             auto needValue = [&](const char* what) -> const char* {
                 if (i + 1 >= argc) {
@@ -325,8 +334,15 @@ namespace newisp {
         }
 
         // ---- consistency ----
-        if (out.command == Command::Burn && out.firmwarePath.empty()) {
-            error = "burn requires a firmware image (-f FILE)";
+        if ((out.command == Command::Burn || out.command == Command::Inspect) && out.firmwarePath.empty()) {
+            error = "inspect/burn requires a firmware image (-f FILE)";
+            return 2;
+        }
+        if (out.command == Command::Inspect &&
+            (out.transportExplicit || !out.burn.deviceId.empty() ||
+             !out.familyName.empty() || out.clockExplicit || out.burn.eepromBytes != 0 ||
+             out.burn.allowHidOnlySerial)) {
+            error = "inspect is offline; device/programming options are not allowed";
             return 2;
         }
 

@@ -22,3 +22,11 @@ add_executable(newisp_tests
 target_link_libraries(newisp_tests PRIVATE newisp_transport)
 
 add_test(NAME newisp_tests COMMAND newisp_tests)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME newisp_cli_preflight COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/cli_preflight_test.py $<TARGET_FILE:newisp>)
+if(UNIX)
+    add_test(NAME newisp_pty_preflight COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/pty_preflight_test.py $<TARGET_FILE:newisp>)
+endif()

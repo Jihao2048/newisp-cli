@@ -186,6 +186,22 @@ namespace {
         CHECK_STREQ(ExtractDeviceId("thing ()"), "thing ()");
     }
 
+    void TestProgrammingPreflight()
+    {
+        std::string error;
+        CHECK(!ValidateProgrammingTarget("STC32G12K128", 256, 131072, 0, error));
+        CHECK(error.find("option preservation") != std::string::npos);
+        CHECK(!ValidateProgrammingTarget("STC32F12K54", 256, 55296, 0, error));
+        CHECK(ValidateProgrammingTarget("AI8051U34K64", 65536, 65536, 0, error));
+        CHECK(error.empty());
+        CHECK(!ValidateProgrammingTarget("AI8051U34K64", 65537, 65536, 0, error));
+        CHECK(!ValidateProgrammingTarget("STC8H8K64U", 32769, 65536, 32768, error));
+        CHECK(!ValidateProgrammingTarget("STC8H8K64U", 1, 65536, 65537, error));
+        CHECK(!ValidateProgrammingTarget("STC8H8K64U", 0, 65536, 0, error));
+        CHECK(!ValidateProgrammingTarget("STC8H8K64U", 1, 0, 0, error));
+        CHECK(ValidateProgrammingTarget("STC8H8K64U", 32768, 65536, 32768, error));
+    }
+
 } // namespace
 
 void RunChipLogicTests()
@@ -200,4 +216,5 @@ void RunChipLogicTests()
     TestProtocolFactory();
     TestFlashSizing();
     TestDeviceIdExtraction();
+    TestProgrammingPreflight();
 }

@@ -12,6 +12,7 @@ namespace newisp {
         None,       // no command given; print usage
         List,       // list serial and HID devices
         Detect,     // probe and report the chip
+        Inspect,    // validate firmware without enumerating/opening devices
         Burn,       // detect, erase, write, write options
         Help,
         Version,
