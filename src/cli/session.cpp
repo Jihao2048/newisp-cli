@@ -444,6 +444,10 @@ namespace newisp {
     int RunBurn(const BurnOptions& opts, const std::vector<uint8_t>& firmware,
         const LogFn& log, const ProgressFn& progress)
     {
+        if (firmware.empty() || firmware.size() > 0x10000u) {
+            log("[失败] firmware is empty or exceeds the 16-bit writer; no device opened");
+            return 1;
+        }
         auto ch = MakeChannel(opts.useHid);
         std::atomic<bool> stopReq{ false };
         std::vector<uint8_t> rxBuf;
@@ -529,6 +533,14 @@ namespace newisp {
         proto->m_status.userTargetFreq = targetFreq;
 
         uint32_t totalFlash = GetChipTotalFlash(chipName, st.magic);
+
+        std::string preflightError;
+        if (!ValidateProgrammingTarget(chipName, firmware.size(), totalFlash,
+                opts.eepromBytes, preflightError)) {
+            log("[失败] " + preflightError);
+            closeCh();
+            return 1;
+        }
 
         if (proto->SupportsEepromSplit()) {
             proto->SetEepromSplit(opts.eepromBytes, totalFlash);

@@ -37,7 +37,7 @@ either a serial (UART) link or the factory USB HID ISP interface.
 - Two transports: classic STC serial ISP monitor and the factory USB HID ISP interface.
 - Automatic chip identification by magic (chip ID) lookup against a table of roughly 1300 parts.
 - Full burn sequence: erase, 64-byte block writes, and option-byte programming.
-- Intel HEX image parsing.
+- Strict, sparse Intel HEX parsing and offline address inspection.
 - Frequency and baud rate handling with human-friendly argument forms
   (`115.2k`, `24M`, `11.0592M`, ...).
 - Measured IRC calibration on the serial transport: the tool derives the trim
@@ -52,7 +52,7 @@ either a serial (UART) link or the factory USB HID ISP interface.
 | STC15 | Includes 15A variant; serial only |
 | STC8 / STC8A / STC8C / STC8F / STC8G / STC8H | Serial and USB HID |
 | STC16 | Serial and USB HID |
-| STC32 | Serial and USB HID |
+| STC32 | Detection only; programming refused pending verified bank addressing and option preservation |
 | STC8051U / AI8051U | Serial and USB HID |
 
 The **8051U** family is documented by the vendor as USB-HID-only, and the tool
@@ -217,6 +217,7 @@ sources in the system ANSI code page (936 / GBK) and fails with `newline in cons
 ```
 newisp list                              list serial and HID devices
 newisp detect   [transport] [device]     probe and identify a chip
+newisp inspect -f FILE                  validate HEX and show address ranges, offline
 newisp burn -f FILE [options] [device]   erase, write and set options
 ```
 
@@ -227,7 +228,7 @@ newisp burn -f FILE [options] [device]   erase, write and set options
 | `-s`, `--serial` | Use the serial transport (default) |
 | `-H`, `--hid` | Use the USB HID transport |
 | `-d`, `--device NAME` | Device to open: `COM7`, `/dev/ttyUSB0`, `/dev/cu.usbserial-*`, or a HID interface path. If omitted and exactly one candidate exists, it is used; if several exist, the tool refuses and lists them. |
-| `-f`, `--file FILE` | Intel HEX image (required for `burn`) |
+| `-f`, `--file FILE` | Intel HEX image (required for `inspect` and `burn`) |
 | `-b`, `--baud RATE` | Baud rate, default `115200`. Accepts forms such as `115200`, `115.2k`, `1M` |
 | `-F`, `--freq HZ` | Target IRC frequency, default 24 MHz. Accepts forms such as `24000000`, `24M`, `11.0592M`. The maximum is 45 MHz; anything above is rejected |
 | `-e`, `--eeprom SIZE` | EEPROM split, e.g. `4K`. `0` keeps the chip's current setting |
@@ -239,6 +240,27 @@ newisp burn -f FILE [options] [device]   erase, write and set options
 | `-V`, `--version` | Show version |
 
 ### Examples
+
+Inspect firmware without enumerating or opening any device:
+
+```sh
+newisp inspect -f app.hex
+```
+
+Checksums, lengths, record shapes, EOF and non-overlapping 32-bit addresses must
+be valid. Blank lines, CRLF, lowercase hex and trailing spaces are accepted;
+other non-record text, records after EOF and records crossing a 64 KiB boundary
+are rejected. Type 03/05 entry records are retained as metadata, not executed.
+Limits are 16 MiB of input text and 1 MiB of actual data, independent of the
+highest address. A high address never causes a multi-gigabyte allocation.
+
+`inspect` succeeding means **valid input**, not a supported programming target.
+It displays a separate programming-unavailable message for extended/banked
+images. `burn` rejects those images **before device discovery**, rather than
+dropping the high address bits or rebasing them. The existing writer can only
+represent addresses `0x0000..0xFFFF`. A detected STC32 is also refused before
+calibration, prepare, erase or option programming, even for a small linear file.
+See [STC32 development status](docs/stc32-development.md) for the remaining work.
 
 List everything the host can see:
 
@@ -389,9 +411,12 @@ The STC8G and STC15 families top out at 35 MHz; a request above that is brought 
 
 ### Option bytes
 
-Option bytes carry the watchdog, reset behaviour and clock configuration. A wrong value can leave a
-chip unable to start, so the tool **echoes the exact MSR bytes it is about to write**. It reads the
-current MSR from the status packet and writes those values back, rather than blindly writing `0xFF`.
+Option bytes carry the watchdog, reset behaviour and clock configuration. A wrong
+value can leave a chip unable to start. Do not interpret the displayed MSR as a
+universal preservation guarantee: the current HID implementation constructs an
+option block using constants and a trim table measured on a different family.
+This is **not validated for STC32**, whose programming path is now refused.
+This change does not validate or redesign other families' option programming.
 
 ### Serial auto-reset
 

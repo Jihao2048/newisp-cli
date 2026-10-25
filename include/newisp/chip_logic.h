@@ -104,6 +104,26 @@ namespace newisp {
         return s.rfind(prefix, 0) == 0;
     }
 
+    // The current writer serializes TWO address bytes. Probe recognition is
+    // not proof of a supported bank mapping or safe option-block format.
+    inline bool ValidateProgrammingTarget(const std::string& chipName,
+        size_t imageBytes, uint32_t totalFlash, uint32_t eepromBytes,
+        std::string& error)
+    {
+        error.clear();
+        if (StartsWith(chipName, "STC32")) {
+            error = "STC32 programming is unavailable: bank addressing and option preservation "
+                    "are not implemented; no erase issued";
+            return false;
+        }
+        if (imageBytes == 0 || imageBytes > 0x10000u || totalFlash == 0 ||
+            eepromBytes > totalFlash || imageBytes > totalFlash - eepromBytes) {
+            error = "firmware exceeds the writer/target capacity or EEPROM split is invalid; no erase issued";
+            return false;
+        }
+        return true;
+    }
+
     inline std::string ProtoIdxToChipName(int idx)
     {
         switch (idx) {

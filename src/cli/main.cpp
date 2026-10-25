@@ -373,8 +373,50 @@ static int RunMain(const std::vector<std::string>& args)
         return 0;
 
     case newisp::Command::Detect:
+    case newisp::Command::Inspect:
     case newisp::Command::Burn:
         break;
+    }
+
+    // Validate firmware BEFORE device enumeration/opening, so a bad file or
+    // unsupported address map cannot reach handshake, erase or option writes.
+    stc::HexImage image;
+    std::vector<uint8_t> firmware;
+    if (opts.command == newisp::Command::Burn || opts.command == newisp::Command::Inspect) {
+        if (!stc::LoadHexFile(opts.firmwarePath, image, error)) {
+            std::cerr << "Error: " << error << '\n';
+            return 1;
+        }
+        if (opts.command == newisp::Command::Inspect) {
+            std::cout << "Intel HEX: valid; " << image.data.size() << " data bytes\n";
+            auto it = image.data.begin();
+            while (it != image.data.end()) {
+                uint32_t first = it->first, last = first;
+                size_t count = 1;
+                ++it;
+                while (it != image.data.end() && static_cast<uint64_t>(last) + 1 == it->first &&
+                       (first >> 16) == (it->first >> 16)) {
+                    last = it->first;
+                    ++count;
+                    ++it;
+                }
+                std::cout << "  0x" << newisp::Hex(first, 8) << "-0x"
+                          << newisp::Hex(last, 8) << " : " << count << " bytes\n";
+            }
+            if (image.entryType)
+                std::cout << "Entry metadata: type " << static_cast<unsigned>(image.entryType)
+                          << ", value 0x" << newisp::Hex(image.entryValue, 8) << '\n';
+            if (stc::BuildLinearFirmware(image, firmware, error))
+                std::cout << "Address map: 16-bit linear; target capacity/options still require validation\n";
+            else
+                std::cout << "Programming unavailable: " << error << '\n';
+            std::cout << "Offline inspection only; no device enumerated, opened, reset or written\n";
+            return 0;
+        }
+        if (!stc::BuildLinearFirmware(image, firmware, error)) {
+            std::cerr << "Error: " << error << '\n';
+            return 1;
+        }
     }
 
     // ---- shared setup for detect and burn ----
@@ -404,19 +446,6 @@ static int RunMain(const std::vector<std::string>& args)
     }
 
     // ---- burn ----
-    stc::HexImage image;
-    std::string hexError;
-    if (!stc::LoadHexFile(opts.firmwarePath, image, hexError)) {
-        std::cerr << "错误: " << hexError << '\n';
-        return 1;
-    }
-
-    // Trim the image to the range that actually holds data: the parser fills
-    // gaps with 0xFF and sizes the vector to the highest address, and writing
-    // the trailing padding would waste flash cycles and time.
-    std::vector<uint8_t> firmware(image.data.begin(),
-        image.data.begin() + (ptrdiff_t)(image.maxAddr + 1));
-
     // Print through std::cout rather than printf: on Windows printf writes
     // through the ANSI code page, so a firmware path containing non-ASCII
     // characters (a Chinese directory name, say) comes out mangled. The stream
