@@ -68,3 +68,27 @@ tests/stc_mcp_probe.py
 
 # Per-machine helpers that only make sense on the author's setup.
 scripts/wsl-artifacts.sh
+
+# ---------------------------------------------------------------------------
+#  Superseded build helpers
+# ---------------------------------------------------------------------------
+# build-variant.cmd compiled the tool with one hand-written cl command line to
+# check a change in a few seconds. It hardcoded the Visual Studio Community path,
+# a scratch object directory under C:\Windows\Temp, and a copy of the source
+# list that had to be kept in step by hand. The CMake presets and the VSCode
+# tasks replaced it.
+scripts/build-variant.cmd
+
+# reset-cmake-preset.ps1 located the CMake preset CMake Tools had remembered by
+# reading VSCode's state.vscdb. That problem is solved in the tracked
+# .vscode/settings.json, which pins the generator and the cache variables so
+# there is no preset to remember; the script only existed to work around the
+# problem it diagnosed.
+scripts/reset-cmake-preset.ps1
+
+# CMakePresets.json described the four language / build-type combinations for
+# CMake Tools. The generator and NEWISP_LANG are now declared in
+# .vscode/settings.json (the status bar button) and passed explicitly by the
+# tasks in .vscode/tasks.json, so nothing reads this file: keeping it in the
+# tree would suggest a preset workflow that is not used.
+CMakePresets.json

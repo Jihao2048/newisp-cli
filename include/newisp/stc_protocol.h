@@ -18,6 +18,13 @@
 #include "newisp/IChannel.h"
 #include "newisp/text.h"
 
+// Log messages are written through the message table rather than inline, so the
+// English wording and every translation stay in one place and the logger can
+// tell a packet dump from a progress line without parsing the text. This must
+// come after the standard headers above: i18n.h does not depend on them, but
+// keeping the project headers together makes the ordering obvious.
+#include "newisp/i18n.h"
+
 namespace stc {
 
     using LogFn = std::function<void(const std::string&)>;
@@ -31,6 +38,20 @@ namespace stc {
     // textually identical to the original.
     using newisp::HexDump;
     using newisp::Hex;
+
+    // Log messages are written through the message table rather than inline, so
+    // the English wording and every translation stay in one place and the
+    // logger can tell a packet dump from a progress line without parsing the
+    // text. I18n::Tr fills the {0}, {1}, ... slots at the call site.
+    //
+    // A namespace alias (`namespace I18n = newisp::i18n;`) would be shorter but
+    // MSVC rejects it outside the global namespace ("C2061: syntax error,
+    // identifier 'i18n'" -- it reads the alias as a using-directive), so the
+    // name is a nested namespace instead. The braces are qualified because a
+    // nested definition cannot reopen newisp::i18n from here.
+    namespace I18n {
+        using namespace ::newisp::i18n;
+    }
 
     // The original spelling for the zero-padded hex formatter.
     inline std::string HexW(uint32_t v, int width = 2) { return Hex(v, width); }

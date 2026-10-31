@@ -121,17 +121,17 @@ namespace stc {
             };
             auto t1 = BuildPacket(pkt1);
             uart.Write(t1);
-            log("[发送] 0x8F: " + HexDump(t1));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x8F", HexDump(t1) }));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             if (!uart.SetBaudRate(targetBaud)) {
-                log("[校准] 切波特率失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogBaudSwitchFailed, "calibration")); return false;
             }
             std::vector<uint8_t> r1;
             bool ok1 = WaitPacket(uart, rxBuf, r1, 2000);
             uart.SetBaudRate(2400);
             if (!ok1 || r1.empty() || r1[0] != 0x8F) {
-                log("[校准] 0x8F 无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogNoResponse, { "calibration", "0x8F" })); return false;
             }
 
             std::vector<uint8_t> pkt2 = {
@@ -141,16 +141,16 @@ namespace stc {
             };
             auto t2 = BuildPacket(pkt2);
             uart.Write(t2);
-            log("[发送] 0x8E: " + HexDump(t2));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x8E", HexDump(t2) }));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             if (!uart.SetBaudRate(targetBaud)) {
-                log("[校准] 切波特率失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogBaudSwitchFailed, "calibration")); return false;
             }
             std::vector<uint8_t> r2;
             bool ok2 = WaitPacket(uart, rxBuf, r2, 2000);
             if (!ok2 || r2.empty() || r2[0] != 0x8E) {
-                log("[校准] 0x8E 无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogNoResponse, { "calibration", "0x8E" })); return false;
             }
 
             std::vector<uint8_t> ping = {
@@ -162,14 +162,14 @@ namespace stc {
                 uart.Write(BuildPacket(ping));
                 std::vector<uint8_t> rp;
                 if (!WaitPacket(uart, rxBuf, rp, 2000)) {
-                    log("[校准] ping-pong 超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogPingTimeout, "calibration")); return false;
                 }
                 if (rp.empty() || rp[0] != 0x80) {
-                    log("[校准] ping-pong 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogPingBadReply, "calibration")); return false;
                 }
             }
 
-            log("[校准] STC89 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -183,11 +183,15 @@ namespace stc {
             };
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x84: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x84", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x80) { log("[4/7] 擦除包错误"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) {
+                log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x80) {
+                log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false;
+            }
             return true;
         }
 
@@ -213,20 +217,22 @@ namespace stc {
 
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout,
+                        { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.empty() || r[0] != 0x80) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply,
+                        { "5/7", std::to_string(blk) })); return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             return true;
         }
@@ -237,11 +243,15 @@ namespace stc {
             std::vector<uint8_t> pl = { 0x8D, m_status.msr[0], 0xFF, 0xFF, 0xFF };
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x8D: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x8D", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x8D) { log("[6/7] 选项响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 3000)) {
+                log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x8D) {
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
+            }
             return true;
         }
 
@@ -359,32 +369,32 @@ namespace stc {
             };
             auto t1 = BuildPacket(pl);
             uart.Write(t1);
-            log("[发送] 0x01: " + HexDump(t1));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x01", HexDump(t1) }));
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
             std::vector<uint8_t> r;
             if (!WaitPacket(uart, rxBuf, r, 2000)) {
-                log("[校准] 0x01 无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogNoResponse, { "calibration", "0x01" })); return false;
             }
             if (r.empty() || r[0] != 0x01) {
-                log("[校准] 0x01 响应错"); return false;
+                log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x01" })); return false;
             }
 
             if (!uart.SetBaudRate(targetBaud)) {
-                log("[校准] 切波特率失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogBaudSwitchFailed, "calibration")); return false;
             }
 
             std::vector<uint8_t> ping = { 0x05, 0x00, 0x00, 0x46, 0xB9 };
             uart.Write(BuildPacket(ping));
             std::vector<uint8_t> rp;
             if (!WaitPacket(uart, rxBuf, rp, 2000)) {
-                log("[校准] ping-pong 超时"); return false;
+                log(I18n::Tr(I18n::Msg::LogPingTimeout, "calibration")); return false;
             }
             if (rp.empty() || rp[0] != 0x05) {
-                log("[校准] ping-pong 响应错"); return false;
+                log(I18n::Tr(I18n::Msg::LogPingBadReply, "calibration")); return false;
             }
 
-            log("[校准] STC89A 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -395,11 +405,15 @@ namespace stc {
             std::vector<uint8_t> pl = { 0x03, 0x00, 0x00, 0x46, 0xB9 };
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x03: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x03", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x03) { log("[4/7] 擦除包错误"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) {
+                log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x03) {
+                log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false;
+            }
             return true;
         }
 
@@ -428,20 +442,22 @@ namespace stc {
 
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout,
+                        { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.empty() || r[0] != 0x02) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply,
+                        { "5/7", std::to_string(blk) })); return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             return true;
         }
@@ -452,11 +468,15 @@ namespace stc {
             std::vector<uint8_t> pl = { 0x04, 0x00, 0x00, 0x46, 0xB9, m_status.msr[0] };
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x04: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x04", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x04) { log("[6/7] 选项响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 3000)) {
+                log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x04) {
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
+            }
             return true;
         }
 

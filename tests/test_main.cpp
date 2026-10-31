@@ -1,4 +1,4 @@
-﻿// Test runner.
+// Test runner.
 //
 // Each suite is a function that registers its own assertions with the macros in
 // test.h; this file calls them all and reports the total.
@@ -11,6 +11,8 @@ void RunHexFileTests();
 void RunChipTableTests();
 void RunChipLogicTests();
 void RunProtocolFramingTests();
+void RunI18nTests();
+void RunOptionsTests();
 
 int main()
 {
@@ -18,6 +20,8 @@ int main()
     RunChipTableTests();
     RunChipLogicTests();
     RunProtocolFramingTests();
+    RunI18nTests();
+    RunOptionsTests();
 
     int failures = newisp_test::Failures();
     if (failures == 0) {

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // Session layer: the bring-up, detect and burn sequences.
 //
 // These were MainWindow::DetectWorker / MainWindow::BurnWorker / OpenSession in
@@ -25,10 +25,24 @@ namespace newisp {
         std::string deviceId;          // COM name / tty path / HID interface path
         bool        useHid = false;    // transport selection
 
+        // True when --serial or --hid was given on the command line.
+        //
+        // It matters only to detect: with no explicit transport, detect probes
+        // both so a board is found wherever it is plugged in, while an explicit
+        // one means "probe exactly this and tell me the answer".
+        bool        transportExplicit = false;
+
         uint32_t    baudRate = 115200;
         uint32_t    targetFreq = 24000000;   // IRC frequency to program
-        bool        clockExternal = false;   // STC12-family clock source
+        bool        clockExternal = false;   // STC10/11/12 clock source
         uint32_t    eepromBytes = 0;         // 0 = keep the chip's setting
+
+        // True when -freq / -clock was given. Separate from the value because
+        // "explicitly 24 MHz" and "not specified, so the default 24 MHz" mean
+        // different things: only some series accept the option at all, so the
+        // run has to know whether the user asked before it can reject it.
+        bool        freqExplicit = false;
+        bool        clockExplicit = false;
 
         // Chip family selected on the command line, used only as a fallback
         // when probing identifies nothing. -1 means "no preference".
@@ -37,16 +51,6 @@ namespace newisp {
         // When false, the burn sequence probes for the chip first; when true it
         // uses protoOverride directly without a wakeup.
         bool        skipProbe = false;
-
-        // Proceed even for a part the documentation says has no serial ISP
-        // monitor (the 8051U family).
-        //
-        // The rule is inherited from the reference material rather than
-        // measured here, and the probe is the real test: a chip that answers
-        // the wakeup can be programmed whatever the manual claims. This flag
-        // turns an up-front refusal into a warning so that can be established
-        // on real hardware.
-        bool        allowHidOnlySerial = false;
     };
 
     // Result of a detect or the probe phase of a burn.

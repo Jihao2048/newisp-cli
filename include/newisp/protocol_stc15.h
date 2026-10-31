@@ -78,10 +78,10 @@ namespace stc {
                 };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x50: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x50", HexDump(tx) }));
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 2000) || r.empty() || r[0] != 0x8f) {
-                    log("[校准] 握手首包无响应或响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x50" })); return false;
                 }
             }
 
@@ -148,27 +148,27 @@ namespace stc {
 
                 auto tx = BuildPacket(pkt);
                 uart.Write(tx);
-                log("[发送] 0x65 粗扫: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x65 coarse", HexDump(tx) }));
 
                 if (!PulseUntilData(uart, 0x7f, 1000, rxBuf)) {
-                    log("[校准] 粗扫无响应"); return false;
+                    log(I18n::Tr(I18n::Msg::LogCoarseNoResponse, "calibration")); return false;
                 }
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 2000)) {
-                    log("[校准] 粗扫读包失败"); return false;
+                    log(I18n::Tr(I18n::Msg::LogCoarseReadFailed, "calibration")); return false;
                 }
-                log("[接收] 0x65 粗扫: " + HexDump(r));
+                log(I18n::Tr(I18n::Msg::LogRx, { "0x65 coarse", HexDump(r) }));
                 if (r.size() < 36 || r[0] != 0x65) {
-                    log("[校准] 粗扫响应长度或首字节错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogCoarseBadLength, "calibration")); return false;
                 }
 
                 uint16_t ta = read_u16(r, 28), ca = read_u16(r, 30);
                 uint16_t tb = read_u16(r, 32), cb = read_u16(r, 34);
-                if (ca == cb) { log("[校准] 粗扫失败：ca 等于 cb"); return false; }
+                if (ca == cb) { log(I18n::Tr(I18n::Msg::LogCoarseSameCount, "calibration")); return false; }
                 double m = (double)(tb - ta) / (double)(cb - ca);
                 double n = (double)ta - m * (double)ca;
                 int pt = (int)(m * (double)program_count + n + 0.5);
-                if (pt < 0 || pt > 65535) { log("[校准] 编程 trim 越界"); return false; }
+                if (pt < 0 || pt > 65535) { log(I18n::Tr(I18n::Msg::LogCoarseTrimOutOfRange, "calibration")); return false; }
                 program_trim = (uint16_t)pt;
 
                 uint16_t trim_a = read_u16(r, 12), count_a = read_u16(r, 14);
@@ -184,14 +184,14 @@ namespace stc {
                     tta = trim_a; ttb = trim_b;
                     tca = count_a; tcb = count_b;
                 }
-                if (tca == tcb) { log("[校准] 细扫区间无效"); return false; }
+                if (tca == tcb) { log(I18n::Tr(I18n::Msg::LogCoarseRangeInvalid, "calibration")); return false; }
                 double m2 = (double)(ttb - tta) / (double)(tcb - tca);
                 double n2 = (double)tta - m2 * (double)tca;
                 int target_trim = (int)(m2 * (double)user_count + n2 + 0.5);
                 int start = target_trim - 5;
                 if (start < (int)tta) start = tta;
                 if (start > (int)ttb) start = ttb;
-                if (start < 0 || start + 11 > 65535) { log("[校准] 细扫起点越界"); return false; }
+                if (start < 0 || start + 11 > 65535) { log(I18n::Tr(I18n::Msg::LogCoarseStartOutOfRange, "calibration")); return false; }
                 target_trim_start = (uint16_t)start;
             }
 
@@ -209,18 +209,18 @@ namespace stc {
                 }
                 auto tx = BuildPacket(pkt);
                 uart.Write(tx);
-                log("[发送] 0x65 细扫: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x65 fine", HexDump(tx) }));
 
                 if (!PulseUntilData(uart, 0x7f, 1000, rxBuf)) {
-                    log("[校准] 细扫无响应"); return false;
+                    log(I18n::Tr(I18n::Msg::LogFineNoResponse, "calibration")); return false;
                 }
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 2000)) {
-                    log("[校准] 细扫读包失败"); return false;
+                    log(I18n::Tr(I18n::Msg::LogFineReadFailed, "calibration")); return false;
                 }
-                log("[接收] 0x65 细扫: " + HexDump(r));
+                log(I18n::Tr(I18n::Msg::LogRx, { "0x65 fine", HexDump(r) }));
                 if (r.size() < 56 || r[0] != 0x65) {
-                    log("[校准] 细扫响应长度或首字节错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogFineBadLength, "calibration")); return false;
                 }
 
                 int best_trim = 0; int best_delta = 0x7FFFFFFF;
@@ -245,16 +245,16 @@ namespace stc {
                 pl.push_back(0x20); pl.push_back(0xff); pl.push_back(0x00);
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x8E 切波特率: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x8E baud switch", HexDump(tx) }));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 2000) || r.empty() || r[0] != 0x84) {
-                    log("[校准] 0x8E 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x8E" })); return false;
                 }
             }
 
-            log("[校准] STC15A 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -271,11 +271,11 @@ namespace stc {
             for (int i = 0x80; i > 0x5e; --i) pl.push_back((uint8_t)i);
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x84 擦除: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x84 erase", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x00) { log("[4/7] 擦除响应错"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) { log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x00) { log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false; }
             return true;
         }
 
@@ -300,30 +300,30 @@ namespace stc {
 
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout, { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.empty() || r[0] != 0x00) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply, { "5/7", std::to_string(blk) })); return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             std::vector<uint8_t> pf = { 0x69, 0x00, 0x00, 0x36, 0x01,
                 (uint8_t)(m_status.magic >> 8), (uint8_t)(m_status.magic & 0xFF) };
             auto tx = BuildPacket(pf);
             uart.Write(tx);
-            log("[发送] 0x69 结束: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x69 final", HexDump(tx) }));
             std::vector<uint8_t> rf;
-            if (!WaitPacket(uart, rxBuf, rf, 2000)) { log("[5/7] 结束包超时"); return false; }
-            log("[接收] " + HexDump(rf));
-            if (rf.empty() || rf[0] != 0x8d) { log("[5/7] 结束包响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, rf, 2000)) { log(I18n::Tr(I18n::Msg::LogFinishTimeout, "5/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(rf) }));
+            if (rf.empty() || rf[0] != 0x8d) { log(I18n::Tr(I18n::Msg::LogFinishBadReply, "5/7")); return false; }
             return true;
         }
 
@@ -338,11 +338,11 @@ namespace stc {
             for (int i = 0; i < 6; ++i) pl.push_back(0xFF);
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x8D 选项: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x8D options", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x50) { log("[6/7] 选项响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 3000)) { log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x50) { log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false; }
             return true;
         }
 
@@ -419,7 +419,7 @@ namespace stc {
                 pl.push_back(0x40);
                 int bauds = (int)(65536.0 - (double)m_status.clockHz / (double)targetBaud / 4.0);
                 if (bauds < 0 || bauds > 65535) {
-                    log("[校准] 外部时钟切波特率越界"); return false;
+                    log(I18n::Tr(I18n::Msg::LogExternalBaudOutOfRange, "calibration")); return false;
                 }
                 pl.push_back((uint8_t)((bauds >> 8) & 0xFF));
                 pl.push_back((uint8_t)(bauds & 0xFF));
@@ -427,16 +427,16 @@ namespace stc {
                 pl.push_back(0x00); pl.push_back(0x00); pl.push_back(iap);
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x01 外部时钟切波特率: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x01 external clock, baud switch", HexDump(tx) }));
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 2000) || r.empty() || r[0] != 0x01) {
-                    log("[校准] 外部时钟切波特率失败"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBaudSwitchFailed, "calibration")); return false;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 m_trimValue = { m_status.raw[4], 0x40 };
                 m_trimFreq = 24000000;
-                log("[校准] STC15 外部时钟切波特率成功");
+                log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
                 return true;
             }
 
@@ -452,16 +452,16 @@ namespace stc {
             pkt1.push_back(0x00); pkt1.push_back(0x40); pkt1.push_back(0x80); pkt1.push_back(0x40); pkt1.push_back(0xff); pkt1.push_back(0x40);
             pkt1.push_back(0x00); pkt1.push_back(0x00); pkt1.push_back(0x80); pkt1.push_back(0x00); pkt1.push_back(0xc0); pkt1.push_back(0x00);
             uart.Write(BuildPacket(pkt1));
-            log("[发送] 0x00 0x0C 第一轮: " + HexDump(pkt1));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x0C round 1", HexDump(pkt1) }));
 
             if (!PulseUntilData(uart, 0xfe, 2000, rxBuf)) {
-                log("[校准] 第一轮无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1NoResponse, "calibration")); return false;
             }
             std::vector<uint8_t> r1;
             if (!WaitPacket(uart, rxBuf, r1, 2000) || r1.size() < 2 || r1[0] != 0x00) {
-                log("[校准] 第一轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1ReadFailed, "calibration")); return false;
             }
-            log("[接收] 0x00 第一轮: " + HexDump(r1));
+            log(I18n::Tr(I18n::Msg::LogRx, { "0x00 round 1", HexDump(r1) }));
 
             auto choose_range = [](const std::vector<uint8_t>& resp,
                 const std::vector<uint8_t>& chal,
@@ -495,17 +495,16 @@ namespace stc {
             auto user_range = choose_range(r1, pkt1, target_user_count);
             auto prog_range = choose_range(r1, pkt1, target_prog_count);
             if (user_range.first < 0 || prog_range.first < 0) {
-                log("[校准] 选择粗扫区间失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRangeSelectFailed, "calibration")); return false;
             }
             uint8_t user_trim_adj = (uint8_t)user_range.first;
             uint8_t user_trim_range = user_range.second;
             uint8_t prog_trim_adj = (uint8_t)prog_range.first;
             uint8_t prog_trim_range = prog_range.second;
 
-            log("[校准] 用户 trim=" + std::to_string(user_trim_adj) +
-                " range=0x" + HexW(user_trim_range) +
-                "，编程 trim=" + std::to_string(prog_trim_adj) +
-                " range=0x" + HexW(prog_trim_range));
+            log(I18n::Tr(I18n::Msg::LogTrimUserProg, {
+                "calibration", std::to_string(user_trim_adj), HexW(user_trim_range),
+                std::to_string(prog_trim_adj), HexW(prog_trim_range) }));
 
             std::vector<uint8_t> pkt2 = { 0x00, 0x0C };
             for (int i = -3; i < 3; ++i) {
@@ -517,15 +516,15 @@ namespace stc {
                 pkt2.push_back(prog_trim_range);
             }
             uart.Write(BuildPacket(pkt2));
-            log("[发送] 0x00 0x0C 第二轮: " + HexDump(pkt2));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x0C round 2", HexDump(pkt2) }));
             if (!PulseUntilData(uart, 0xfe, 2000, rxBuf)) {
-                log("[校准] 第二轮无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2NoResponse, "calibration")); return false;
             }
             std::vector<uint8_t> r2;
             if (!WaitPacket(uart, rxBuf, r2, 2000) || r2.size() < 2 || r2[0] != 0x00) {
-                log("[校准] 第二轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2ReadFailed, "calibration")); return false;
             }
-            log("[接收] 0x00 第二轮: " + HexDump(r2));
+            log(I18n::Tr(I18n::Msg::LogRx, { "0x00 round 2", HexDump(r2) }));
 
             auto choose_trim = [](const std::vector<uint8_t>& resp,
                 const std::vector<uint8_t>& chal,
@@ -551,10 +550,11 @@ namespace stc {
 
             auto user_trim_final = choose_trim(r2, pkt2, target_user_count);
             auto prog_trim_final = choose_trim(r2, pkt2, target_prog_count);
-            log("[校准] 最终用户 trim=" + std::to_string(user_trim_final.first) +
-                " range=0x" + HexW(user_trim_final.second) +
-                "，编程 trim=" + std::to_string(prog_trim_final.first) +
-                " range=0x" + HexW(prog_trim_final.second));
+            log(I18n::Tr(I18n::Msg::LogTrimFinal, {
+                "calibration", std::to_string(user_trim_final.first),
+                HexW(user_trim_final.second),
+                std::to_string(prog_trim_final.first),
+                HexW(prog_trim_final.second) }));
 
             m_trimValue = user_trim_final;
 
@@ -581,18 +581,18 @@ namespace stc {
             pl3.push_back(iap);
 
             uart.Write(BuildPacket(pl3));
-            log("[发送] 0x01 切波特率: " + HexDump(pl3));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x01 baud switch", HexDump(pl3) }));
             std::vector<uint8_t> r3;
             if (!WaitPacket(uart, rxBuf, r3, 2000) || r3.empty() || r3[0] != 0x01) {
-                log("[校准] 0x01 响应错"); return false;
+                log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x01" })); return false;
             }
-            log("[接收] 0x01: " + HexDump(r3));
+            log(I18n::Tr(I18n::Msg::LogRx, { "0x01", HexDump(r3) }));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             uart.SetBaudRate(targetBaud);
 
             m_trimFreq = user_speed;
 
-            log("[校准] STC15 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -606,11 +606,11 @@ namespace stc {
             }
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x03 擦除: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x03 erase", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x03) { log("[4/7] 擦除响应错"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) { log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x03) { log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false; }
             return true;
         }
 
@@ -637,31 +637,31 @@ namespace stc {
 
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout, { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.size() < 2 || r[0] != 0x02 || r[1] != 0x54) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply, { "5/7", std::to_string(blk) })); return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             if (m_status.bslVersion >= 0x72) {
                 std::vector<uint8_t> pf = { 0x07, 0x00, 0x00, 0x5A, 0xA5 };
                 auto tx = BuildPacket(pf);
                 uart.Write(tx);
-                log("[发送] 0x07 结束: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x07 final", HexDump(tx) }));
                 std::vector<uint8_t> rf;
-                if (!WaitPacket(uart, rxBuf, rf, 2000)) { log("[5/7] 结束包超时"); return false; }
-                log("[接收] " + HexDump(rf));
+                if (!WaitPacket(uart, rxBuf, rf, 2000)) { log(I18n::Tr(I18n::Msg::LogFinishTimeout, "5/7")); return false; }
+                log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(rf) }));
                 if (rf.size() < 2 || rf[0] != 0x07 || rf[1] != 0x54) {
-                    log("[5/7] 结束包响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogFinishBadReply, "5/7")); return false;
                 }
             }
             return true;
@@ -694,12 +694,12 @@ namespace stc {
             for (auto b : opts) pl.push_back(b);
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x04 选项: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x04 options", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
+            if (!WaitPacket(uart, rxBuf, r, 3000)) { log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
             if (r.size() < 2 || r[0] != 0x04 || r[1] != 0x54) {
-                log("[6/7] 选项响应异常"); return false;
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
             }
             return true;
         }

@@ -1,4 +1,4 @@
-﻿// Session layer implementation.
+// Session layer implementation.
 //
 // The sequences here are ported from the WinUI build's OpenSession,
 // DetectWorker and BurnWorker. The wire protocol is untouched; what changed is
@@ -18,6 +18,11 @@
 using namespace stc;
 
 namespace newisp {
+
+    // Log text goes through the message table; Tr fills the {0}, {1}, ...
+    // slots at the call site. See include/newisp/text_en.inc.
+    using i18n::Msg;
+    using i18n::Tr;
 
     namespace {
 
@@ -47,15 +52,15 @@ namespace newisp {
                 McuStatus trySt{};
                 if (!proto->ParseStatus(pl, trySt)) continue;
 
-                log(std::string("[接收] (") + tag + ") payload " +
-                    std::to_string(pl.size()) + ": " + HexDump(pl));
+                log(LogLine(Msg::LogRxPayload, { tag, std::to_string(pl.size()),
+                    HexDump(pl) }, i18n::LogKind::Packet));
 
                 res.got = true;
                 res.st = trySt;
                 res.protoName = proto->Params().name;
                 rxBuf.erase(rxBuf.begin(),
                     rxBuf.begin() + (ptrdiff_t)consumed);
-                log(std::string("[") + tag + "] 识别为 " + res.protoName);
+                log(Tr(Msg::LogIdentifiedAs, { tag, res.protoName }));
                 return true;
             }
 
@@ -94,22 +99,20 @@ namespace newisp {
             if (stopReq.load()) break;
 
             if (!ch.Open(deviceId, 2400, protoList[0]->UseEvenParity())) {
-                log(std::string("[") + tag +
-                    "] 打开串口失败，请检查端口是否被占用或选择正确");
+                log(Tr(Msg::LogSerialOpenFailed, tag));
                 res.openFailed = true;
                 return res;
             }
 
             if (!resetDone) {
                 resetDone = true;
-                log(std::string("[") + tag + "] 自动复位脉冲 DTR 250ms");
+                log(Tr(Msg::LogResetPulse, tag));
                 ch.PulseReset(0, 250, 30);
             }
 
             rxBuf.clear();
             ch.Flush();
-            log(std::string("[") + tag + "] 第 " + std::to_string(round) +
-                " 轮握手...");
+            log(Tr(Msg::LogHandshakeRound, { tag, std::to_string(round) }));
 
             std::vector<uint8_t> wake = { 0x7F };
 
@@ -163,17 +166,15 @@ namespace newisp {
                 if (res.got) break;
 
                 if ((p + 1) % 20 == 0) {
-                    log(std::string("[") + tag + "] 第 " +
-                        std::to_string(round) + " 轮: 已 pulse " +
-                        std::to_string(p + 1) + "/" +
-                        std::to_string(PULSE_PER_ROUND));
+                    log(Tr(Msg::LogPulseProgress, { tag,
+                        std::to_string(round), std::to_string(p + 1),
+                        std::to_string(PULSE_PER_ROUND) }));
                 }
             }
 
             if (res.got) break;
             ch.Close();
-            log(std::string("[") + tag + "] 第 " + std::to_string(round) +
-                " 轮无响应，重试...");
+            log(Tr(Msg::LogRoundNoResponse, { tag, std::to_string(round) }));
             for (int ms = 0; ms < RETRY_WAIT_MS; ms += 50) {
                 if (stopReq.load()) break;
                 SleepMs(50);
@@ -196,8 +197,7 @@ namespace newisp {
         if (protoList.empty()) return res;
 
         if (!ch.Open(deviceId, 0, protoList[0]->UseEvenParity())) {
-            log(std::string("[") + tag +
-                "] 打开 HID 设备失败，请检查设备是否被占用");
+            log(Tr(Msg::LogHidOpenFailed, tag));
             res.openFailed = true;
             return res;
         }
@@ -214,8 +214,7 @@ namespace newisp {
             if (!ch.Write(init)) {
                 // A failed write is silent otherwise, and it is the one thing
                 // that makes the whole probe look like an absent chip. Say so.
-                log(std::string("[") + tag + "] 写入探测包失败 (" +
-                    proto->Params().name + ")");
+                log(Tr(Msg::LogProbeWriteFailed, { tag, proto->Params().name }));
                 continue;
             }
 
@@ -227,8 +226,8 @@ namespace newisp {
                 if (TryParseAll(protoList, rxBuf, res, log, tag)) break;
             }
             if (!res.got) {
-                log(std::string("[") + tag + "] " + proto->Params().name +
-                    " 无应答（已收 " + std::to_string(rxBuf.size()) + " 字节）");
+                log(Tr(Msg::LogNoAnswer, { tag, proto->Params().name,
+                    std::to_string(rxBuf.size()) }));
             }
             if (res.got) break;
         }
@@ -257,19 +256,18 @@ namespace newisp {
     void PrintMcuInfo(const McuStatus& st, const std::string& protoName,
         const LogFn& log)
     {
-        log("--------------------------------------------------");
-        log(std::string("芯片型号 : ") + ChipNameFromTable(st.magic));
-        log(std::string("Magic    : ") + Hex(st.magic, 4));
+        log(Tr(Msg::Separator));
+        log(Tr(Msg::ChipModel, ChipNameFromTable(st.magic)));
+        log(Tr(Msg::Magic, Hex(st.magic, 4)));
         if (!protoName.empty())
-            log(std::string("协议     : ") + protoName);
+            log(Tr(Msg::ProtocolName, protoName));
 
         // BSL stepping byte is an ASCII letter on every family that reports it.
         std::string stepping;
         if (st.bslStepping >= 0x20 && st.bslStepping < 0x7F)
             stepping = std::string(1, (char)st.bslStepping);
-        log(std::string("BSL 版本 : ") +
-            std::to_string(st.bslVersion >> 4) + "." +
-            std::to_string(st.bslVersion & 0x0F) + stepping);
+        log(Tr(Msg::BslVersion, std::to_string(st.bslVersion >> 4) + "." +
+            std::to_string(st.bslVersion & 0x0F) + stepping));
 
         {
             uint32_t ip = st.clockHz / 1000000;
@@ -277,11 +275,10 @@ namespace newisp {
             char fb[8];
             std::snprintf(fb, sizeof(fb), "%06u", fp);
             fb[3] = '\0';
-            log(std::string("时钟频率 : ") + std::to_string(ip) + "." + fb +
-                " MHz");
+            log(Tr(Msg::ClockFrequency, std::to_string(ip) + "." + fb));
         }
 
-        log("--------------------------------------------------");
+        log(Tr(Msg::Separator));
     }
 
     namespace {
@@ -302,43 +299,62 @@ namespace newisp {
                     uint32_t codeSize = (uint32_t)msr4 * 256;
                     if (codeSize <= totalFlash) {
                         uint32_t eeSize = totalFlash - codeSize;
-                        log(std::string("当前 EEPROM: ") +
-                            std::to_string(eeSize) + " 字节（程序区 " +
-                            std::to_string(codeSize) + " 字节）");
+                        log(Tr(Msg::CurrentEeprom, { std::to_string(eeSize),
+                            std::to_string(codeSize) }));
                     }
                     else {
-                        log("当前 EEPROM: 值异常");
+                        log(Tr(Msg::CurrentEepromInvalid));
                     }
                 }
                 else {
-                    log("当前 EEPROM: 未设置");
+                    log(Tr(Msg::CurrentEepromUnset));
                 }
             }
         }
 
-        // Clamp the requested frequency to what the family can actually reach.
+        // Resolve the requested frequency against the family's own menu.
         //
-        // Every family now tops out at or below the vendor's 45 MHz ceiling;
-        // STC8G and STC15 reach only 35 MHz, so a request above that is brought
-        // down with a note rather than attempted.
-        uint32_t ClampFrequency(const std::string& chipName, uint32_t freq,
+        // This used to be a clamp: anything above the family's ceiling was
+        // brought down to it. That is the wrong shape now that the menus differ
+        // per family, because the two failures are different mistakes:
+        //
+        //   above the ceiling   35 MHz asked of an 8H -- a frequency that
+        //                       family can reach, just not at that value. Clamp
+        //                       to the ceiling and say so, as before.
+        //   not in the menu     45.100 on an 8H, or 60 MHz on anything but the
+        //                       32G144K246 -- no trim exists for it and none
+        //                       can be derived. Refuse rather than round to
+        //                       something else.
+        //
+        // The return value is the frequency to write; 0 means refused, and the
+        // reason has already been logged.
+        uint32_t ResolveFrequency(const std::string& chipName, uint32_t freq,
             const LogFn& log)
         {
-            auto starts = [&](const char* p) {
-                return chipName.rfind(p, 0) == 0;
-            };
+            FrequencyMenu menu = FrequencyMenuFor(chipName);
+            uint32_t ceiling = menu.hz[menu.maxIdx];
 
-            bool isStc8g = starts("STC8G") || starts("AI8G") || starts("JX8G");
-            bool isStc15 = IsStc15Family(chipName);
-            int freqMax = kNumFreq - 1;
-            if (isStc8g)      freqMax = kFreqMaxIdxStc8G;
-            else if (isStc15) freqMax = kFreqMaxIdxStc15;
+            if (freq > ceiling) {
+                // Only a ceiling overshoot gets the old clamping treatment; an
+                // in-range value that is not a menu entry falls through to the
+                // refusal below, where it gets an honest message.
+                if (IsFrequencyInMenu(chipName, ceiling)) {
+                    log(Tr(Msg::FrequencyClamped, FormatDouble(ceiling / 1e6, 4)));
+                    return ceiling;
+                }
+            }
 
-            if (freq > kFreqTable[freqMax]) {
-                log("[频率] 该系列最高 " +
-                    FormatDouble(kFreqTable[freqMax] / 1e6, 4) +
-                    " MHz，目标频率已下调");
-                return kFreqTable[freqMax];
+            if (!IsFrequencyInMenu(chipName, freq)) {
+                log(Tr(Msg::CliErrFreqNotInMenu, {
+                    FormatDouble(freq / 1e6, 4), chipName.empty() ? "?" : chipName }));
+                return 0;
+            }
+            if (!HasTrimFor(freq)) {
+                // In the menu, but the protocol layer has no trim triple for it
+                // yet. Refusing here names the problem at the top of the run
+                // rather than in the middle of an erase.
+                log(Tr(Msg::CliErrFreqNoTrim, FormatDouble(freq / 1e6, 4)));
+                return 0;
             }
             return freq;
         }
@@ -350,8 +366,7 @@ namespace newisp {
             const LogFn& log)
         {
             if (IsLegacyBaudProto(protoName) && baud > 115200) {
-                log("[2/7] 该系列最高 115200，已从 " + std::to_string(baud) +
-                    " 下调");
+                log(Tr(Msg::BaudClamped, std::to_string(baud)));
                 return 115200;
             }
             return baud;
@@ -370,71 +385,106 @@ namespace newisp {
     //  Detect
     // =======================================================================
 
+    namespace {
+
+        // Probe one transport and report what answered on it.
+        //
+        // Returns:
+        //    1  a chip was identified and reported
+        //    0  the transport was usable but nothing answered
+        //   -1  the transport could not be used at all (no such device)
+        //
+        // The three outcomes are distinct because "nothing on the serial port"
+        // is normal when the board is plugged in over USB, while "the HID
+        // device could not be opened" is worth saying out loud.
+        int DetectOneTransport(const BurnOptions& opts, const LogFn& log)
+        {
+            auto ch = MakeChannel(opts.useHid);
+            std::atomic<bool> stopReq{ false };
+            std::vector<uint8_t> rxBuf;
+
+            auto probeList = MakeProbeList(opts.useHid);
+
+            log(opts.useHid ? Tr(Msg::DetectingHid) : Tr(Msg::DetectingSerial));
+
+            auto r = OpenSession(*ch, opts.deviceId, rxBuf, probeList, log,
+                stopReq, "detect");
+
+            if (r.openFailed) {
+                if (ch->IsOpen()) ch->Close();
+                log(opts.useHid ? Tr(Msg::DetectFailedNotHid)
+                                : Tr(Msg::DetectFailedSerial));
+                return -1;
+            }
+
+            if (!r.got) {
+                if (ch->IsOpen()) ch->Close();
+                log(Tr(Msg::ChipNotFound));
+                return 0;
+            }
+
+            // Restore the parity the detected family needs before signing off,
+            // so the chip leaves the ISP monitor in a defined state. The 0xFF
+            // packet is the reset-and-run command.
+            bool wantParity = true;
+            for (auto& p : probeList) {
+                if (p->Params().name == r.protoName) {
+                    wantParity = p->UseEvenParity();
+                    break;
+                }
+            }
+            if (ch->IsOpen() && ch->EvenParity() != wantParity) {
+                ch->SetParity(wantParity);
+            }
+            if (ch->IsOpen()) {
+                auto reset = probeList.empty()
+                    ? std::vector<uint8_t>{}
+                    : probeList.front()->ProbeBuild({ 0xFF });
+                if (!reset.empty()) ch->Write(reset);
+                ch->Close();
+            }
+
+            std::string chipName = ChipNameFromTable(r.st.magic);
+            r.chipName = chipName;
+
+            // The 8051U is documented as HID-only, but it answered a serial
+            // probe, and answering is the proof that matters. Report the
+            // discrepancy and carry on rather than refusing: the transfer is
+            // the experiment.
+            if (IsHidOnlyChip(chipName) && !opts.useHid) {
+                log(LogLine(Msg::HidOnlyAnsweredSerial, chipName,
+                    i18n::LogKind::Attention));
+                log(LogLine(Msg::HidOnlyContinuing, i18n::LogKind::Attention));
+            }
+
+            // The part answered over HID, which means it really does have a USB
+            // controller -- but say so when the name is not one of the three
+            // families that are known to: everything has been probed here, so a
+            // hit on some other family would mean the vendor put USB on a part
+            // the documentation does not list, and the result is worth
+            // confirming.
+            if (opts.useHid && !IsUsbCapableChip(chipName)) {
+                log(LogLine(Msg::UnexpectedUsbChip, chipName,
+                    i18n::LogKind::Attention));
+            }
+
+            log(Tr(Msg::DetectOk, chipName));
+            PrintMcuInfo(r.st, r.protoName, log);
+            PrintProtoParams(r.protoName, r.st, log);
+            return 1;
+        }
+
+    } // namespace
+
     int RunDetect(const BurnOptions& opts, const LogFn& log)
     {
-        auto ch = MakeChannel(opts.useHid);
-        std::atomic<bool> stopReq{ false };
-        std::vector<uint8_t> rxBuf;
-
-        auto probeList = MakeProbeList(opts.useHid);
-
-        log(opts.useHid ? "检测中（USB HID）..."
-                        : "检测中（最多 500 轮自动重启）...");
-
-        auto r = OpenSession(*ch, opts.deviceId, rxBuf, probeList, log, stopReq,
-            "检测");
-
-        if (r.openFailed) {
-            if (ch->IsOpen()) ch->Close();
-            log(opts.useHid ? "打开 HID 设备失败，已停止"
-                            : "打开串口失败，已停止");
-            return 1;
-        }
-
-        if (!r.got) {
-            if (ch->IsOpen()) ch->Close();
-            log("未检测到芯片");
-            return 1;
-        }
-
-        // Restore the parity the detected family needs before signing off, so
-        // the chip leaves the ISP monitor in a defined state. The 0xFF packet
-        // is the reset-and-run command.
-        bool wantParity = true;
-        for (auto& p : probeList) {
-            if (p->Params().name == r.protoName) {
-                wantParity = p->UseEvenParity();
-                break;
-            }
-        }
-        if (ch->IsOpen() && ch->EvenParity() != wantParity) {
-            ch->SetParity(wantParity);
-        }
-        if (ch->IsOpen()) {
-            auto reset = probeList.empty()
-                ? std::vector<uint8_t>{}
-                : probeList.front()->ProbeBuild({ 0xFF });
-            if (!reset.empty()) ch->Write(reset);
-            ch->Close();
-        }
-
-        std::string chipName = ChipNameFromTable(r.st.magic);
-        r.chipName = chipName;
-
-        // The 8051U is documented as HID-only, but it answered a serial probe,
-        // and answering is the proof that matters. Report the discrepancy and
-        // carry on rather than refusing: the transfer is the experiment.
-        if (IsHidOnlyChip(chipName) && !opts.useHid) {
-            log("[注意] " + chipName +
-                " 按官方手册只有 USB HID 下载方式，但它在串口上应答了探测。");
-            log("[注意] 继续按串口流程处理。这是手册与实际不符的情况，"
-                "结果需要自行确认。");
-        }
-
-        log("检测成功: " + chipName);
-        PrintMcuInfo(r.st, r.protoName, log);
-        PrintProtoParams(r.protoName, r.st, log);
-        return 0;
+        // One transport, one device. Which one is decided before this is
+        // called: an explicit --device wins, otherwise the single candidate the
+        // transport reported, and anything ambiguous was refused earlier with
+        // the candidate list. Probing every port in turn was tried and removed:
+        // `detect` is about identifying the chip on the chosen link, and
+        // listing what is attached is what `list` is for.
+        return DetectOneTransport(opts, log) == 1 ? 0 : 1;
     }
 
     // =======================================================================
@@ -445,7 +495,7 @@ namespace newisp {
         const LogFn& log, const ProgressFn& progress)
     {
         if (firmware.empty() || firmware.size() > 0x10000u) {
-            log("[失败] firmware is empty or exceeds the 16-bit writer; no device opened");
+            log(Tr(Msg::FirmwareUnusable));
             return 1;
         }
         auto ch = MakeChannel(opts.useHid);
@@ -453,8 +503,8 @@ namespace newisp {
         std::vector<uint8_t> rxBuf;
         std::unique_ptr<IStcProtocol> proto;
 
-        auto fail = [&](const char* stage, const char* why) {
-            log(std::string("[失败] ") + stage + " - " + why);
+        auto fail = [&](Msg msg) {
+            log(Tr(msg));
         };
         auto closeCh = [&]() {
             if (ch->IsOpen()) ch->Close();
@@ -463,28 +513,25 @@ namespace newisp {
         auto probeList = MakeProbeList(opts.useHid);
 
         if (!opts.useHid)
-            log("[1/7] 握手（最多 500 轮自动重启）...");
+            log(Tr(Msg::Handshaking));
 
         auto r = OpenSession(*ch, opts.deviceId, rxBuf, probeList, log, stopReq,
-            opts.useHid ? "探测" : "烧录");
+            opts.useHid ? "detect" : "burn");
 
         if (r.openFailed) {
-            fail(opts.useHid ? "HID 设备" : "串口",
-                "打开失败，请检查设备是否被占用");
+            fail(opts.useHid ? Msg::BurnFailHidOpen : Msg::BurnFailSerialOpen);
             closeCh();
             return 1;
         }
 
         if (!r.got) {
-            fail(opts.useHid ? "探测" : "握手",
-                opts.useHid ? "未检测到芯片（确认已按住 BOOT 重新上电）"
-                            : "500 轮后仍未检测到芯片（检查类型是否选对）");
+            fail(opts.useHid ? Msg::BurnFailHidProbe : Msg::BurnFailSerialProbe);
             closeCh();
             return 1;
         }
 
         auto st = r.st;
-        log(opts.useHid ? "[1/7] 已识别芯片" : "[1/7] 握手成功");
+        log(opts.useHid ? Tr(Msg::BurnChipIdentified) : Tr(Msg::BurnHandshakeOk));
         progress(5);
 
         bool wantParity = true;
@@ -495,32 +542,27 @@ namespace newisp {
             }
         }
         if (ch->IsOpen() && ch->EvenParity() != wantParity) {
-            if (!ch->SetParity(wantParity)) log("[警告] 切换校验位失败");
+            if (!ch->SetParity(wantParity)) log(Tr(Msg::ParitySwitchFailed));
         }
 
         std::string chipName = ChipNameFromTable(st.magic);
 
-        if (IsUnsupportedForTransport(chipName, opts.useHid,
-                opts.allowHidOnlySerial)) {
-            fail("提示", "该芯片没有串口 ISP 模式，请改用 --hid，"
-                         "或加 --force-serial 强制尝试");
-            closeCh();
-            return 1;
-        }
-
+        // Every part this tool knows answers on its serial ISP monitor, so
+        // there is no transport gate to apply; the probe already decided
+        // whether this chip is listening. An 8051U over serial is a supported
+        // combination, only worth a note if the handshake then fails.
         if (IsHidOnlyChip(chipName) && !opts.useHid) {
-            log("[警告] " + chipName +
-                " 按文档说明没有串口 ISP 监视器，本次按串口流程继续。");
+            log(Tr(Msg::NoSerialIspWarning, chipName));
         }
 
         // Prefer the implementation that identified itself during probing; fall
-        // back to the name-derived one, then to the family override.
+        // back to the name-derived one, then to the series override.
         proto = CloneProtocolByName(r.protoName, opts.useHid);
         if (!proto) proto = CreateProtocol(chipName, opts.useHid);
         if (!proto && opts.protoOverride >= 0)
             proto = MakeProtocol(opts.protoOverride, opts.useHid);
         if (!proto) {
-            fail("协议", "无法为该芯片选择协议实现");
+            fail(Msg::ProtocolSelectFailed);
             closeCh();
             return 1;
         }
@@ -529,15 +571,65 @@ namespace newisp {
         proto->m_status.userTargetFreq = opts.targetFreq;
         proto->m_status.wantExternalClock = opts.clockExternal;
 
-        uint32_t targetFreq = ClampFrequency(chipName, opts.targetFreq, log);
+        // Families with no selectable frequency (STC10/11/12 and STC89/90) get
+        // their clock from a crystal or from the internal RC at whatever it runs
+        // at; the option byte only records the source. Writing a target
+        // frequency there would program a trim for an oscillator the part does
+        // not tune, so say so and stop rather than burning option bytes that
+        // mean something else on this family.
+        //
+        // The test is on freqExplicit, not on targetFreq: the frequency has a
+        // 24 MHz default, so a burn that never mentioned it still has a value
+        // in hand and would otherwise be refused here on every STC12.
+        if (opts.freqExplicit && !HasSelectableFrequency(chipName)) {
+            log(LogLine(Msg::CliErrNoFreqForSeries, chipName, i18n::LogKind::Error));
+            closeCh();
+            return 1;
+        }
+
+        // Likewise for the EEPROM split: STC15/12/89 have no such field in
+        // their option block, so a requested split would be programmed into an
+        // option byte that means something else on those parts.
+        if (opts.eepromBytes && !HasSelectableEeprom(chipName)) {
+            log(LogLine(Msg::CliErrNoEepromForSeries, chipName, i18n::LogKind::Error));
+            closeCh();
+            return 1;
+        }
+
+        // And for the clock source: only STC10/11/12 record one in their option
+        // byte. On the other families -freq already chooses the clock (the IRC)
+        // or there is no option bit for it at all (STC89/90), so writing the
+        // bit would flip an unrelated option.
+        if (opts.clockExplicit && !HasSelectableClockSource(chipName)) {
+            log(LogLine(Msg::CliErrNoClockForSeries, chipName, i18n::LogKind::Error));
+            closeCh();
+            return 1;
+        }
+
+        uint32_t targetFreq = opts.targetFreq;
+        if (targetFreq) {
+            // Deliberately not clamping a value that is not in the menu: a
+            // clamp turns "60 MHz on an 8H" into "45.1584 MHz", which burns
+            // option bytes at a speed the user never asked for. Overshooting
+            // the ceiling is clamped (and logged); anything else is refused.
+            targetFreq = ResolveFrequency(chipName, targetFreq, log);
+            if (targetFreq == 0) {
+                closeCh();
+                return 1;
+            }
+        }
         proto->m_status.userTargetFreq = targetFreq;
 
         uint32_t totalFlash = GetChipTotalFlash(chipName, st.magic);
 
+        // The preflight verdict is already a complete sentence from the chip
+        // logic layer, which is shared with the tests, so it is printed as it
+        // is rather than wrapped: translating it here would mean keeping a
+        // second copy of the same diagnosis.
         std::string preflightError;
         if (!ValidateProgrammingTarget(chipName, firmware.size(), totalFlash,
                 opts.eepromBytes, preflightError)) {
-            log("[失败] " + preflightError);
+            log(i18n::kErrorMarker + preflightError);
             closeCh();
             return 1;
         }
@@ -550,20 +642,20 @@ namespace newisp {
 
         {
             auto pp = proto->Params();
-            log("块大小   : " + std::to_string(pp.blockSize) + " 字节");
-            log(std::string("IAP 等待 : 0x") + Hex(pp.iapWait));
-            log(std::string("5A A5    : ") + (pp.need5AA5 ? "需要" : "不需要"));
+            log(Tr(Msg::BlockSize, std::to_string(pp.blockSize)));
+            log(Tr(Msg::IapWait, Hex(pp.iapWait)));
+            log(Tr(Msg::FiveAFive, Tr(pp.need5AA5 ? Msg::Required
+                                                  : Msg::NotRequired)));
         }
         PrintProtoParams(proto->Params().name, st, log);
 
         if (proto->SupportsEepromSplit()) {
             if (opts.eepromBytes > 0) {
-                log("EEPROM   : " + FormatDouble(opts.eepromBytes / 1024.0, 1) +
-                    " K（将写入，程序区 " +
-                    std::to_string(totalFlash - opts.eepromBytes) + " 字节）");
+                log(Tr(Msg::EepromWrite, { FormatDouble(opts.eepromBytes / 1024.0, 1),
+                    std::to_string(totalFlash - opts.eepromBytes) }));
             }
             else {
-                log("EEPROM   : 自动（保留芯片设置）");
+                log(Tr(Msg::EepromAuto));
             }
         }
 
@@ -571,13 +663,13 @@ namespace newisp {
         if (opts.useHid) {
             // The USB ISP interface needs no wakeup and has no baud rate to
             // negotiate, so this step only primes the option-block trim values.
-            log("[2/7] 准备时钟参数...");
+            log(Tr(Msg::PrepareClock));
             if (!proto->Handshake(*ch, rxBuf, 0, log)) {
-                fail("[2/7] 参数", "失败");
+                fail(Msg::PrepareClockFailed);
                 closeCh();
                 return 1;
             }
-            log("[2/7] 参数就绪");
+            log(Tr(Msg::PrepareClockReady));
             progress(15);
 
             rxBuf.clear();
@@ -588,39 +680,39 @@ namespace newisp {
             // rate to negotiate over USB, but the ISP still expects this
             // exchange; skipping it makes the subsequent erase command time out
             // without a reply.
-            log("[2/7] 设置波特率 (0x01)...");
+            log(Tr(Msg::SetBaudHid));
             {
                 std::vector<uint8_t> pl = { 0x01, 0x00, 0x00, 0x00,
                                             0x00, 0x00, 0x00, 0x80 };
                 auto tx = proto->ProbeBuild(pl);
                 ch->Write(tx);
-                log(std::string("[发送] 0x01: ") + HexDump(tx));
+                log(LogLine(Msg::LogTx, { "0x01", HexDump(tx) }, i18n::LogKind::Packet));
 
                 std::vector<uint8_t> rr;
                 if (!proto->ProbeWait(*ch, rxBuf, rr, 2000)) {
-                    fail("[2/7] 0x01", "无响应");
+                    fail(Msg::SetBaudFailed);
                     closeCh();
                     return 1;
                 }
-                log(std::string("[接收] ") + HexDump(rr));
+                log(LogLine(Msg::LogRx, { "", "\b" + HexDump(rr) }, i18n::LogKind::Packet));
                 if (rr.empty() || rr[0] != 0x01) {
-                    fail("[2/7] 0x01", "响应包错误");
+                    fail(Msg::SetBaudBadReply);
                     closeCh();
                     return 1;
                 }
             }
-            log("[2/7] 波特率设置完成");
+            log(Tr(Msg::SetBaudDone));
         }
         else {
-            log("[2/7] 校准并切换波特率...");
+            log(Tr(Msg::CalibrateBaud));
             uint32_t baud = ClampBaud(proto->Params().name, opts.baudRate, log);
 
             if (!proto->Handshake(*ch, rxBuf, baud, log)) {
-                fail("[2/7] 校准", "失败");
+                fail(Msg::CalibrateFailed);
                 closeCh();
                 return 1;
             }
-            log("[2/7] 已切到 " + std::to_string(baud));
+            log(Tr(Msg::BaudSwitched, std::to_string(baud)));
             progress(15);
 
             rxBuf.clear();
@@ -630,7 +722,7 @@ namespace newisp {
 
         // ---- step 3: prepare programming (0x05), where the family has it ----
         if (NeedsPrepare05(proto->Params().name)) {
-            log("[3/7] 准备编程 (0x05)...");
+            log(Tr(Msg::PrepareProgramming));
             std::vector<uint8_t> pl;
             pl.push_back(0x05);
             if (st.bslVersion >= 0x72) {
@@ -639,48 +731,48 @@ namespace newisp {
             }
             auto tx = proto->ProbeBuild(pl);
             ch->Write(tx);
-            log(std::string("[发送] 0x05: ") + HexDump(tx));
+            log(LogLine(Msg::LogTx, { "0x05", HexDump(tx) }, i18n::LogKind::Packet));
 
             std::vector<uint8_t> rr;
             if (!proto->ProbeWait(*ch, rxBuf, rr, 2000)) {
-                fail("[3/7] 0x05", "无响应");
+                fail(Msg::Prepare05Failed);
                 closeCh();
                 return 1;
             }
-            log(std::string("[接收] ") + HexDump(rr));
+            log(LogLine(Msg::LogRx, { "", "\b" + HexDump(rr) }, i18n::LogKind::Packet));
             if (rr.empty() || rr[0] != 0x05) {
-                fail("[3/7] 0x05", "响应包错误");
+                fail(Msg::Prepare05BadReply);
                 closeCh();
                 return 1;
             }
-            log("[3/7] 准备编程成功");
+            log(Tr(Msg::Prepare05Ok));
         }
         else {
-            log("[3/7] 跳过（该系列无 0x05 步骤）");
+            log(Tr(Msg::Prepare05Skipped));
         }
         progress(25);
 
         // ---- step 4: erase ----
-        log("[4/7] 擦除...");
+        log(Tr(Msg::EraseStart));
         if (!proto->EraseFlash(*ch, rxBuf, firmware.size(), firmware.size(), log)) {
-            fail("[4/7] 擦除", "失败");
+            fail(Msg::EraseFailed);
             closeCh();
             return 1;
         }
-        log("[4/7] 擦除成功");
+        log(Tr(Msg::EraseOk));
         progress(35);
 
         // ---- step 5: program ----
-        log("[5/7] 写入代码...");
+        log(Tr(Msg::WriteStart));
         if (!proto->ProgramFlash(*ch, rxBuf, firmware, progress, log)) {
-            fail("[5/7] 写块", "失败");
+            fail(Msg::WriteBlockFailed);
             closeCh();
             return 1;
         }
-        log("[5/7] 写块完成");
+        log(Tr(Msg::WriteOk));
 
         // ---- step 6: option bytes ----
-        log("[6/7] 写入选项...");
+        log(Tr(Msg::OptionsStart));
         {
             // Option bytes carry the watchdog, reset behaviour and clock
             // configuration; a wrong value can leave the chip unable to start,
@@ -689,20 +781,20 @@ namespace newisp {
             std::string msr = "MSR: " + Hex(st.msr[0]) + " " + Hex(st.msr[1]) +
                 " " + Hex(st.msr[2]) + " " + Hex(st.msr[3]);
             if (cs.empty())
-                log("[6/7] 将回写 " + msr);
+                log(Tr(Msg::OptionsEcho, msr));
             else
-                log("[6/7] 将回写 " + msr + " （时钟源=" + cs + "）");
+                log(Tr(Msg::OptionsEchoClock, { msr, cs }));
         }
         if (!proto->ProgramOptions(*ch, rxBuf, log)) {
-            fail("[6/7] 选项", "失败");
+            fail(Msg::OptionsFailed);
             closeCh();
             return 1;
         }
-        log("[6/7] 选项写入成功");
+        log(Tr(Msg::OptionsOk));
         progress(100);
 
         // ---- step 7: run ----
-        log("[7/7] 烧录完成！");
+        log(Tr(Msg::BurnDone));
         proto->Disconnect(*ch);
         closeCh();
         return 0;

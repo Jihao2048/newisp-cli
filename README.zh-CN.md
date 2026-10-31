@@ -2,12 +2,6 @@
 
 STC 全系列单片机跨平台烧录工具（命令行版）。
 
-本仓库是 [New ISP](https://github.com/Jihao2048) 图形版（WinUI 3 / C++/WinRT）的**跨平台移植**：
-协议层代码原样搬过来，UI 换成了 CMake 构建的命令行程序，同一个代码库在
-**Windows、macOS、Linux** 上都能编译运行。
-
-三个平台**都已在真实硬件上验证通过**。
-
 ---
 
 ## 目录
@@ -19,7 +13,6 @@ STC 全系列单片机跨平台烧录工具（命令行版）。
   - [Windows](#windows)
   - [Linux](#linux)
   - [macOS](#macos)
-  - [不带 HID 支持编译](#不带-hid-支持编译)
 - [编码注意事项](#编码注意事项)
 - [用法](#用法)
   - [命令](#命令)
@@ -53,22 +46,11 @@ STC 全系列单片机跨平台烧录工具（命令行版）。
 | STC89/90 | STC89C52RC、STC89C516RD、STC90C58RD 等 |
 | STC10/11/12 | STC12C5A60S2、STC12LE5A60S2、IAP11F06 等（含 12A / 12B 变体）|
 | STC15 | STC15F104E、STC15W408AS、IAP15W4K58S4 等（含 15A 变体）|
-| STC8 | STC8F、STC8A、STC8C、GX8S 等 |
+| STC8 | STC8F、STC8A、STC8C、GX8S 等；仅串口，无 USB |
 | STC8G | STC8G1K08、AI8G1K08、JX8G 等 |
-| STC8H | STC8H1K08 ~ STC8H8K64U、AI8H 等 |
-| STC16 | STC16、AI16 系列 |
-| STC32 | 仅识别；STC32 型号的烧录暂不支持，不能把识别成功当作烧录验证 |
+| STC8H | STC8H1K08 ~ STC8H8K64U、AI8H 等；串口 + USB HID |
+| STC32 | 串口 + USB HID，与 8051U 同一套协议；支持 64 KiB 以内镜像 |
 | STC8051U | STC8051U34K64、AI8051U34K64 等 |
-
-> 📌 **8051U 系列串口与 USB HID 都能烧录。**
->
-> 官方手册把 8051U 列为「仅 USB HID」，早期版本据此在串口模式下直接拒绝。
-> 实测（AI8051U34K64，BSL 7.4U）发现该结论不成立：串口 ISP 监视器会应答唤醒
-> 字节，校准握手与完整烧录流程均正常。该限制已移除——**芯片应答即说明可用**，
-> 由探测本身决定，而非由手册决定。
-
-> 📌 可选 IRC 频率上限为 **45MHz**（厂商验证范围），**没有超频档**。
-> 超出范围的 `-F` 会明确报错。
 
 ---
 
@@ -87,7 +69,7 @@ STC 经典 ISP 监视器。芯片可能还在跑用户程序，所以工具会�
 
 ### USB HID
 
-STC 出厂 USB ISP 接口（`VID 0x34BF / PID 0x1001`），STC32、STC8H、STC8G、8051U 等型号支持。
+STC 出厂 USB ISP 接口（`VID 0x34BF / PID 0x1001`），STC32、STC8H、8051U 等型号支持。
 
 - **不需要唤醒**：用户按住 BOOT 上电时芯片已经在 ISP 监视器里了
 - **不需要波特率协商**：USB 链路由主控同步，直接写选项字节里的频率和 trim
@@ -194,18 +176,26 @@ macOS 的串口设备是 **`/dev/cu.*`**。**优先用 `cu` 而不是 `tty`**：
 
 更详细的 macOS 步骤（含命令行工具安装）见 [`docs/macos-build.md`](docs/macos-build.md)。
 
-### 不带 HID 支持编译
+---
+
+## 输出语言（编译期决定）
+
+语言在**编译时选定**，并且只把选中的那一份语言表编进二进制——另一份语言在可执行文件里
+根本不存在：
 
 ```sh
-cmake -S . -B build -DNEWISP_ENABLE_HID=OFF
+cmake -S . -B build-zh -DNEWISP_LANG=zh-CN     # 中文（默认）
+cmake -S . -B build-en -DNEWISP_LANG=en        # 英文
 ```
 
-会生成**纯串口版**，运行 `--hid` 或 `list` 时会提示"本版本未编译 USB HID 支持"。
+所以**同一个二进制不能在运行时切换语言**；要两种都要，就 configure 两次。
+这对一个小巧的自包含烧录工具来说是刻意的取舍：启动时不做 locale 查询、运行时没有语言表切换、
+目标机上也没有东西可以配错。
 
-macOS / Linux 上如果没装 hidapi，也会**自动降级**到这种状态。这是**有意设计**的：
-缺一个可选依赖不应该变成链接错误，纯串口本身也是能用的工具。
-
-Windows 上 HID 来自系统库，所以除非显式关掉，否则总是可用。
+文案表分两处：`include/newisp/text_en.inc` 是英文源文本（同时也是基准表），`src/i18n/` 下每个
+语言一个文件，每条都以英文原意为名字。新增一种语言 = 加一个 `.inc`、加一个 `NEWISP_LANG` 取值、
+加一个编译宏，调用方代码一行都不用改。`tests/test_i18n.cpp` 会检查译文是否保留了每个 `{n}` 占位符、
+有没有漏译的条目。
 
 ---
 
@@ -213,7 +203,7 @@ Windows 上 HID 来自系统库，所以除非显式关掉，否则总是可用�
 
 **源码文件是 UTF-8 with BOM，且 MSVC 编译时加了 `/utf-8`。**
 
-两个都需要，原因是日志里有中文：不加 BOM 的话，MSVC 会按系统 ANSI 代码页（中文 Windows 上是
+两个都需要，原因是文案表和注释里有中文：不加 BOM 的话，MSVC 会按系统 ANSI 代码页（中文 Windows 上是
 936/GBK）读源文件，把中文字符串当成 GBK 解析，直接报 `常量中有换行符` 编译错误。
 
 **请勿去掉 BOM。** 换行符统一用 **LF**（`.gitattributes` 里已强制）。
@@ -225,43 +215,45 @@ Windows 上 HID 来自系统库，所以除非显式关掉，否则总是可用�
 ### 命令
 
 ```sh
-newisp                                  列出设备，然后显示帮助
-newisp list                             列出串口和 HID 设备
+newisp                                  显示提示：用 help 看用法，用 list 列出可用设备
 newisp detect   [传输方式] [设备]        探测并识别芯片
-newisp burn -f FILE [参数] [设备]        擦除、写入、写选项字节
+newisp inspect  FILE                    离线校验 HEX 并显示地址范围
+newisp burn     FILE [参数] [设备]       擦除、写入、写选项字节
 ```
 
 ### 参数
 
 | 参数 | 说明 |
 |---|---|
-| `-s`, `--serial` | 用串口 ISP（默认） |
-| `-H`, `--hid` | 用 USB HID ISP |
+| `FILE` | 固件文件紧跟在子命令后面：`newisp burn app.hex`、`newisp inspect app.hex`。`burn` 和 `inspect` 必填，没有对应的选项 |
+| `-s`, `--serial [BAUD]` | 用串口 ISP（默认）。可选 BAUD 是握手波特率，默认 115200，支持 `115200`、`115.2k`、`1M` 写法。例：`-s 921600` |
+| `-h`, `--hid` | 用 USB HID ISP |
 | `-d`, `--device NAME` | 设备名：`COM7`、`/dev/ttyUSB0`、`/dev/cu.usbserial-*` 或 HID 设备路径。省略时若只有一个候选设备则自动选，多个则报错并列出 |
-| `-f`, `--file FILE` | Intel HEX 固件（`burn` 必需）|
-| `-b`, `--baud RATE` | 串口波特率，默认 115200。支持 `115200`、`115.2k`、`1M` 写法 |
-| `-F`, `--freq HZ` | 目标 IRC 频率，默认 24MHz。支持 `24000000`、`24M`、`11.0592M`。**上限 45MHz**，超出会报错 |
+| `-f`, `-freq`, `-frequency HZ` | 目标 IRC 频率，默认 24MHz。支持 `24000000`、`24M`、`11.0592M`。必须是该系列频率表里的档位，否则报错 |
 | `-e`, `--eeprom SIZE` | EEPROM 分割，如 `4K`（`0` = 保留芯片设置）|
-| `--clock internal\|external` | 时钟源（仅 STC89/12/15 有）|
-| `--family NAME` | 探测失败时的兜底系列：`stc89`、`stc12`、`stc15`、`stc8g`、`stc32`、`stc8` |
-| `-q`, `--quiet` | 只显示错误和最终结果 |
-| `-v`, `--verbose` | 显示原始报文（排查问题时用）|
-| `-h`, `--help` | 帮助 |
-| `-V`, `--version` | 版本 |
+| `-c`, `--clock internal\|external` | 时钟源。只有 STC10/11/12 有这一位，其他系列会拒绝 |
+| `-series NAME` | 探测失败时的兜底系列：`stc89`、`stc12`、`stc15`、`stc8g`、`stc8h`、`stc8a`、`stc32`、`stc8`。**必须全拼**（`-ser` 无效）|
+| `-o`, `--output LEVEL` | 日志详细程度：`quiet`（只显示错误和最终结果）、`normal`（默认）、`verbose`（含原始报文）|
+| `help` | 显示帮助（是主命令，不是选项）|
+| `version` | 显示版本（是主命令，不是选项）|
+
+> 选项名大小写不敏感，且长名接受唯一前缀缩写（`-ee` 即 `-eeprom`），
+> 但 `-serial`、`-series` 必须全拼：`-s` 是串口，又是 `-series` 的首字母。
+> 频率项有四种写法：`-frequency`、`-freq`、`-F`、`-f`（**不接受** `-fr`
+> 之类的缩写，拼错会报错并提示正确写法）。
+> 固件文件不是选项，而是子命令后的第一个参数。
+> 工具接受单破折号写法（`-output`、`-series`），
+> 文中表格的 `--` 形式为便于阅读的惯用写法。
+
+> 没有 `--lang` 参数：输出语言在编译时用 `-DNEWISP_LANG=zh-CN|en` 选定，
+> 见 [输出语言（编译期决定）](#输出语言编译期决定)。
 
 ### 示例
-
-**列出设备：**
-
-```sh
-newisp list
-newisp list -v          # 详细模式，会列出所有 HID 设备（含鼠标键盘）
-```
 
 **检测芯片：**
 
 ```sh
-newisp detect --hid                              # USB HID
+newisp detect -h                                 # USB HID
 newisp detect --device /dev/ttyUSB0              # Linux 串口
 newisp detect --device /dev/cu.usbserial-1420    # macOS 串口
 newisp detect -d COM13                           # Windows 串口
@@ -271,16 +263,16 @@ newisp detect -d COM13                           # Windows 串口
 
 ```sh
 # USB HID，目标 45MHz（AI8051U 等）
-newisp burn -f firmware.hex --hid -F 45M
+newisp burn firmware.hex -h -F 45M
 
 # 串口，460800 波特率，目标 24MHz
-newisp burn -f firmware.hex -d /dev/ttyUSB0 -b 460800
+newisp burn firmware.hex -d /dev/ttyUSB0 -s 460800
 
 # 带 EEPROM 分割和详细日志
-newisp burn -f firmware.hex -d COM13 -F 35M -e 4K -v
+newisp burn firmware.hex -d COM13 -F 35M -e 4K -output verbose
 
 # STC12 系列选择外部晶振
-newisp burn -f firmware.hex -d COM13 --clock external
+newisp burn firmware.hex -d COM13 --clock external
 ```
 
 ---
@@ -304,6 +296,14 @@ cmake --build build-tests -j
   哪些能走 HID
 - **报文帧格式**：精确字节和校验和、所有协议的往返、容忍前导噪声、拒绝错误校验和和丢失结束符、
   处理跨两次读到的分包、拒绝错误系列或不合理时钟的状态包
+- **文案表**（`tests/test_i18n.cpp`）：每条译文的 `{n}` 占位符与英文源一致、没有漏译的正文、
+  二进制自报的语言和它实际打印的语言一致、区分"报文原样转储"和"进度行"的日志标记在译文里仍然成立。
+  它按构建所选的语言运行，所以发版前请把 `-DNEWISP_LANG=zh-CN` 和 `-DNEWISP_LANG=en` 各编一次测一次。
+- **CLI 预检**（`tests/cli_preflight_test.py`）刻意只断言退出码、十六进制地址等不随翻译变化的
+  内容，因此对任一语言的构建都成立。
+
+> 中文 Windows 上 Python 会用 936 代码页解码工具的 UTF-8 输出，直接抛 `UnicodeDecodeError`；
+> `tests/CMakeLists.txt` 已为 CTest 条目设置 `PYTHONUTF8=1`。手动跑脚本时请自行设置该变量。
 
 ### 伪终端协议测试（不需要硬件）⭐
 
@@ -422,7 +422,7 @@ STC8G 和 STC15 系列上限为 35MHz，超出会带提示下调。
 
 ### 离线固件检查
 
-`newisp inspect -f app.hex` 严格检查校验和、长度、记录格式、EOF、重叠和地址溢出，
+`newisp inspect app.hex` 严格检查校验和、长度、记录格式、EOF、重叠和地址溢出，
 保留完整的 32 位地址，不打开或枚举任何设备。输入上限为 16 MiB，实际数据上限为 1 MiB。
 检查成功不代表可以烧录。当前 16 位写入器不支持扩展地址或分 bank 固件，`burn` 会在
 访问设备之前拒绝。类型 03/05 的入口信息只作为元数据保留。

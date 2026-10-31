@@ -50,9 +50,9 @@ either a serial (UART) link or the factory USB HID ISP interface.
 | STC89 / STC90 | Serial only |
 | STC10 / STC11 / STC12 | Includes 12A / 12B variants; serial only |
 | STC15 | Includes 15A variant; serial only |
-| STC8 / STC8A / STC8C / STC8F / STC8G / STC8H | Serial and USB HID |
-| STC16 | Serial and USB HID |
-| STC32 | Detection only; programming refused pending verified bank addressing and option preservation |
+| STC8 / STC8A / STC8C / STC8F / STC8G | Serial only (no USB controller) |
+| STC8H | Serial and USB HID |
+| STC32 | Serial and USB HID, same protocol as the 8051U; images up to 64 KiB |
 | STC8051U / AI8051U | Serial and USB HID |
 
 The **8051U** family is documented by the vendor as USB-HID-only, and the tool
@@ -193,58 +193,84 @@ the argument handling and device enumeration of the resulting binary.
 The Windows build links only against `setupapi` and `hid`; nothing has to be downloaded, installed
 or shipped alongside the executable.
 
-### Building without HID
+### USB HID is required, not optional
 
-HID support can be turned off with `-DNEWISP_ENABLE_HID=OFF`, which produces a **serial-only**
-binary that reports `this build has no USB HID support` when `--hid` or `list` is used.
+There is no switch to build without HID. The 8051U family has no serial ISP monitor at all, so a
+build without HID would be a build that cannot program part of the catalogue -- and it would fail on
+somebody's bench instead of at configure time. On macOS and Linux `hidapi` is therefore a hard
+dependency: if it is missing, `cmake` stops and says which package to install. On Windows nothing is
+needed beyond the system HID class driver.
 
-On macOS and Linux the same thing happens automatically when `hidapi` is not installed. This is
-deliberate: a missing optional dependency should not turn into a link error, and serial alone is a
-working tool. On Windows the backend is built from the system HID class driver, so HID is always
-available there unless it is explicitly disabled.
+### Choosing the output language
+
+The language is fixed **when the tool is built**, and only that language's table is compiled into
+the binary -- the other one is not in the executable at all:
+
+```sh
+cmake -S . -B build-zh -DNEWISP_LANG=zh-CN     # Chinese (the default)
+cmake -S . -B build-en -DNEWISP_LANG=en        # English
+```
+
+That means one binary cannot switch languages at run time; to ship both, configure twice. The
+trade-off is deliberate for a small self-contained programmer: no locale lookup at start-up, no
+runtime table switching, nothing to misconfigure on the target.
+
+The message table lives in `include/newisp/text_en.inc` (the English source text, which is the
+reference) and `src/i18n/` (one file per language, each entry named after its English wording).
+Adding a language means adding one `.inc` file, one `NEWISP_LANG` value and one compile definition;
+no calling code changes. `tests/test_i18n.cpp` checks that a translation keeps every `{n}` slot and
+that no entry was left untranslated.
 
 ## Encoding note (important)
 
 All source files are **UTF-8 with BOM**, and on MSVC the build additionally adds `/utf-8`.
 
-Both are required because the log messages contain Chinese text. Without them, MSVC reads the
-sources in the system ANSI code page (936 / GBK) and fails with `newline in constant` errors.
+Both are required because the message tables and the comments contain Chinese text. Without them,
+MSVC reads the sources in the system ANSI code page (936 / GBK) and fails with `newline in constant`
+errors.
 
 **Do not strip the BOMs.**
 
 ## Usage
 
 ```
-newisp list                              list serial and HID devices
 newisp detect   [transport] [device]     probe and identify a chip
-newisp inspect -f FILE                  validate HEX and show address ranges, offline
-newisp burn -f FILE [options] [device]   erase, write and set options
+newisp inspect FILE                      validate HEX and show address ranges, offline
+newisp burn FILE [options] [device]      erase, write and set options
 ```
 
 ### Options
 
 | Option | Description |
 | --- | --- |
-| `-s`, `--serial` | Use the serial transport (default) |
-| `-H`, `--hid` | Use the USB HID transport |
+| `FILE` | The Intel HEX image is the first positional argument, right after the command: `newisp burn app.hex`, `newisp inspect app.hex`. It is required for `burn` and `inspect`; there is no flag for it. |
+| `-s`, `--serial [BAUD]` | Use the serial transport (default). The optional BAUD is the handshake rate, default `115200`; accepts forms such as `115200`, `115.2k`, `1M`. Example: `-s 921600` |
+| `-h`, `--hid` | Use the USB HID transport |
 | `-d`, `--device NAME` | Device to open: `COM7`, `/dev/ttyUSB0`, `/dev/cu.usbserial-*`, or a HID interface path. If omitted and exactly one candidate exists, it is used; if several exist, the tool refuses and lists them. |
-| `-f`, `--file FILE` | Intel HEX image (required for `inspect` and `burn`) |
-| `-b`, `--baud RATE` | Baud rate, default `115200`. Accepts forms such as `115200`, `115.2k`, `1M` |
-| `-F`, `--freq HZ` | Target IRC frequency, default 24 MHz. Accepts forms such as `24000000`, `24M`, `11.0592M`. The maximum is 45 MHz; anything above is rejected |
+| `-f`, `-freq`, `-frequency HZ` | Target IRC frequency, default 24 MHz. Accepts forms such as `24000000`, `24M`, `11.0592M`. It has to be an entry of that series' menu; anything else is rejected |
 | `-e`, `--eeprom SIZE` | EEPROM split, e.g. `4K`. `0` keeps the chip's current setting |
-| `--clock internal\|external` | Clock source for the STC89/12/15 option bytes |
-| `--family NAME` | Fallback family to use when probing identifies nothing |
-| `-q`, `--quiet` | Reduce output |
-| `-v`, `--verbose` | Increase output |
-| `-h`, `--help` | Show help |
-| `-V`, `--version` | Show version |
+| `-c`, `--clock internal\|external` | Clock source. Only STC10/11/12 record one; other series reject the option |
+| `-series NAME` | Fallback series to use when probing identifies nothing: `stc89`, `stc12`, `stc15`, `stc8g`, `stc8h`, `stc8a`, `stc32`, `stc8`. Must be spelled out in full (`-ser` is not accepted) |
+| `-o`, `--output LEVEL` | How much of the log to show: `quiet` (errors and the final summary only), `normal` (default), `verbose` (adds the raw packet dumps) |
+| `help` | Show help (a command, not an option) |
+| `version` | Show version (a command, not an option) |
+
+Option names are case-insensitive, and long names accept a unique prefix (`-ee` for
+`-eeprom`), except `-serial` and `-series`: `-s` is the serial transport and the first
+letter of `-series`. The frequency has exactly four accepted spellings --
+`-frequency`, `-freq`, `-F` and `-f` -- and an abbreviation such as `-fr` is rejected
+with a hint rather than resolved. The tool takes the single-dash spelling (`-output`,
+`-series`); the `--` forms in the table above are the conventional long-option spelling.
+
+There is no `--lang` flag: the output language is chosen when the tool is built, with
+`-DNEWISP_LANG=zh-CN|en`. See [Choosing the output language](#choosing-the-output-language).
 
 ### Examples
 
 Inspect firmware without enumerating or opening any device:
 
 ```sh
-newisp inspect -f app.hex
+newisp inspect app.hex
 ```
 
 Checksums, lengths, record shapes, EOF and non-overlapping 32-bit addresses must
@@ -257,16 +283,9 @@ highest address. A high address never causes a multi-gigabyte allocation.
 `inspect` succeeding means **valid input**, not a supported programming target.
 It displays a separate programming-unavailable message for extended/banked
 images. `burn` rejects those images **before device discovery**, rather than
-dropping the high address bits or rebasing them. The existing writer can only
-represent addresses `0x0000..0xFFFF`. A detected STC32 is also refused before
-calibration, prepare, erase or option programming, even for a small linear file.
-See [STC32 development status](docs/stc32-development.md) for the remaining work.
-
-List everything the host can see:
-
-```sh
-newisp list
-```
+dropping the high address bits or rebasing them. The writer addresses a 64-byte
+block with 16 bits, so `0x0000..0xFFFF` is the reachable range for every family,
+STC32 included.
 
 Probe a chip on a specific serial port:
 
@@ -277,25 +296,25 @@ newisp detect -s -d /dev/ttyUSB0
 Probe a chip over USB HID:
 
 ```sh
-newisp detect --hid
+newisp detect -h
 ```
 
 Burn an image at 24 MHz:
 
 ```sh
-newisp burn -f firmware.hex -d COM7
+newisp burn firmware.hex -d COM7
 ```
 
 Burn with an explicit baud rate, frequency and EEPROM split:
 
 ```sh
-newisp burn -f firmware.hex -b 115.2k -F 24M -e 4K -d /dev/cu.usbserial-1420
+newisp burn firmware.hex -s 115.2k -F 24M -e 4K -d /dev/cu.usbserial-1420
 ```
 
 Force a family when identification fails, with the external clock source:
 
 ```sh
-newisp burn -f firmware.hex --family STC8H --clock external
+newisp burn firmware.hex -series stc8h --clock external
 ```
 
 ## Testing
@@ -319,6 +338,19 @@ step and which are reachable over HID), and the packet framing (exact bytes and 
 trips for every protocol, tolerance of leading noise, rejection of bad checksums and lost
 terminators, waiting for a packet split across two reads, and status decoding that rejects the
 wrong family or an implausible clock).
+
+`tests/test_i18n.cpp` covers the message table: every `{n}` slot in a translation matches the
+English source, no prose entry was left untranslated, the text the binary reports as its language is
+the text it actually prints, and the log markers that separate packet dumps from progress lines
+survive translation. It runs against whichever language the build was configured for, so build both
+`-DNEWISP_LANG=zh-CN` and `-DNEWISP_LANG=en` before release.
+
+`tests/cli_preflight_test.py` deliberately asserts on exit codes, hex addresses and other untranslated
+tokens rather than on English sentences, so it passes for either language.
+
+On a Chinese Windows, Python decodes the tool's UTF-8 output with code page 936 and raises
+`UnicodeDecodeError`; `tests/CMakeLists.txt` sets `PYTHONUTF8=1` for the CTest entries to avoid
+that. If you run the script by hand, set the same variable.
 
 ### Protocol test over a pseudo-terminal
 

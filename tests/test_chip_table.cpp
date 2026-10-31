@@ -19,15 +19,20 @@ namespace {
 
     void TestUnknownIdGetsPlaceholder()
     {
-        // 0x0000 is not a real chip ID. The caller distinguishes "unknown" by
-        // comparing against kUnknownChipName rather than by an empty string, so
-        // the placeholder must be non-empty and stable.
+        // 0x0000 is not a real chip ID. The placeholder is prose shown to the
+        // user, so it is translated and the exact wording depends on the build
+        // language -- but it must never be empty, or the chip report would show
+        // a blank name and look like a parsing bug.
         std::string name = ChipNameFromTable(0x0000);
         CHECK(!name.empty());
-        CHECK_STREQ(name, kUnknownChipName);
+        CHECK_STREQ(name, UnknownChipName());
 
         // A plausible-looking but absent ID must take the same path.
-        CHECK_STREQ(ChipNameFromTable(0x0001), kUnknownChipName);
+        CHECK_STREQ(ChipNameFromTable(0x0001), UnknownChipName());
+
+        // The English constant stays English whatever the build language, so
+        // callers and logs that compare against it keep working.
+        CHECK_STREQ(kUnknownChipName, "unknown part");
     }
 
     void TestTableIsNotEmpty()

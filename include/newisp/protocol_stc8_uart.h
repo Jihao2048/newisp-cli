@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // STC32 / STC8G / STC8 protocol implementations -- serial (UART) transport.
 //
 // This is the serial half of the pair. The HID half lives in
@@ -105,27 +105,27 @@ namespace stc {
             auto pktBytes = BuildPacket(pkt1);
             uart.Write(pktBytes);
 
-            log("[校准] 目标频率 " + std::to_string(userSpeed / 1000) +
-                " kHz, target_user_count=" + std::to_string(targetUserCount));
-            log("[发送] 0x00 0x08 (" + std::to_string(pktBytes.size()) + " 字节):");
-            log("     " + HexDump(pktBytes));
+            log(I18n::Tr(I18n::Msg::LogHidTargetFreq, { "calibration", std::to_string(userSpeed / 1000) }));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x08 (" + std::to_string(pktBytes.size()) + " bytes)", "" }));
+            log(I18n::kPacketContinuation + HexDump(pktBytes));
 
             {
                 uint64_t t0 = GetTickCount64();
                 bool ok = PulseUntilData(uart, 0xFE, 2000, rxBuf);
                 uint64_t dt = GetTickCount64() - t0;
-                log("[校准] pulse 0xFE 返回=" + std::to_string(ok ? 1 : 0) +
-                    ", 耗时=" + std::to_string(dt) + " ms");
-                log("[接收] " + std::to_string(rxBuf.size()) + " 字节: " +
-                    (rxBuf.empty() ? std::string("空") : HexDump(rxBuf)));
-                if (!ok) { log("[校准] 第一轮无响应"); return false; }
+                log(I18n::Tr(I18n::Msg::LogPulseStats, { "calibration",
+                    std::to_string(ok ? 1 : 0), std::to_string(dt) }));
+                log(I18n::Tr(I18n::Msg::LogRxBytes, { "receive",
+                    std::to_string(rxBuf.size()),
+                    rxBuf.empty() ? I18n::Tr(I18n::Msg::LogNoBytes) : HexDump(rxBuf) }));
+                if (!ok) { log(I18n::Tr(I18n::Msg::LogRound1NoResponse, "calibration")); return false; }
             }
 
             std::vector<uint8_t> resp1;
             if (!WaitPacket(uart, rxBuf, resp1, 2000)) {
-                log("[校准] 第一轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1ReadFailed, "calibration")); return false;
             }
-            log("[接收] resp1 (" + std::to_string(resp1.size()) + "): " + HexDump(resp1));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp1 (" + std::to_string(resp1.size()) + ")", HexDump(resp1) }));
             if (resp1.empty() || resp1[0] != 0x00) return false;
             uint8_t calibLen = resp1.size() > 1 ? resp1[1] : 0;
 
@@ -168,17 +168,17 @@ namespace stc {
             }
             auto pkt2Bytes = BuildPacket(pkt2);
             uart.Write(pkt2Bytes);
-            log("[发送] 0x00 0x0C: " + HexDump(pkt2Bytes));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x0C", HexDump(pkt2Bytes) }));
 
             if (!PulseUntilData(uart, 0xFE, 2000, rxBuf)) {
-                log("[校准] 第二轮无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2NoResponse, "calibration")); return false;
             }
 
             std::vector<uint8_t> resp2;
             if (!WaitPacket(uart, rxBuf, resp2, 2000)) {
-                log("[校准] 第二轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2ReadFailed, "calibration")); return false;
             }
-            log("[接收] resp2: " + HexDump(resp2));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp2", HexDump(resp2) }));
             if (resp2.empty() || resp2[0] != 0x00) return false;
 
             uint32_t target2 = targetUserCount * (uint32_t)dividerUse;
@@ -212,24 +212,22 @@ namespace stc {
             };
             auto pkt3Bytes = BuildPacket(pkt3);
             uart.Write(pkt3Bytes);
-            log("[发送] 0x01: " + HexDump(pkt3Bytes));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x01", HexDump(pkt3Bytes) }));
 
             std::vector<uint8_t> resp3;
             if (!WaitPacket(uart, rxBuf, resp3, 2000)) {
-                log("[校准] 切波特率无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogNoResponse, { "calibration", "0x01" })); return false;
             }
-            log("[接收] resp3: " + HexDump(resp3));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp3", HexDump(resp3) }));
             if (resp3.empty() || resp3[0] != 0x01) return false;
 
             if (!uart.SetBaudRate(targetBaud)) {
-                log("[校准] 主机切波特率失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogHostBaudSwitchFailed, "calibration")); return false;
             }
-            log("[校准] 主机已切到 " + std::to_string(targetBaud));
+            log(I18n::Tr(I18n::Msg::LogHostBaudSwitched, { "calibration", std::to_string(targetBaud) }));
 
-            log("[校准] 成功 trim_adj=" + std::to_string(adjFinal) +
-                ", trim_range=0x" + HexW(trimRange) +
-                ", trim_div=" + std::to_string(dividerUse) +
-                ", trim_freq=" + std::to_string(m_trimFreq) + " Hz");
+            log(I18n::Tr(I18n::Msg::LogTrimSummary, { "calibration", std::to_string(adjFinal),
+                HexW(trimRange), std::to_string(dividerUse), std::to_string(m_trimFreq) }));
             return true;
         }
 
@@ -241,15 +239,15 @@ namespace stc {
             if (Params().need5AA5) { pl.push_back(0x00); pl.push_back(0x5A); pl.push_back(0xA5); }
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x03: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x03", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x03) { log("[4/7] 擦除包错误"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) { log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x03) { log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false; }
 
             if (r.size() >= 8) {
                 m_uid.assign(r.begin() + 1, r.begin() + 8);
-                log("[UID] " + HexDump(m_uid));
+                log(I18n::Tr(I18n::Msg::LogUid, { "", "\b" + HexDump(m_uid) }));
             }
             return true;
         }
@@ -273,29 +271,29 @@ namespace stc {
                 }
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout, { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.size() < 2 || r[0] != 0x02 || r[1] != 0x54) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常: " + HexDump(r));
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply, { "5/7", std::to_string(blk), HexDump(r) }));
                     return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             if (Params().need5AA5) {
                 auto tx = BuildPacket({ 0x07, 0x00, 0x00, 0x5A, 0xA5 });
                 uart.Write(tx);
-                log("[发送] 0x07: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x07", HexDump(tx) }));
                 std::vector<uint8_t> r;
-                if (!WaitPacket(uart, rxBuf, r, 2000)) { log("[5/7] 结束包超时"); return false; }
-                log("[接收] " + HexDump(r));
+                if (!WaitPacket(uart, rxBuf, r, 2000)) { log(I18n::Tr(I18n::Msg::LogFinishTimeout, "5/7")); return false; }
+                log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
             }
             return true;
         }
@@ -334,13 +332,12 @@ namespace stc {
                     opts[28] = ft->trim[0];
                     opts[29] = ft->trim[1];
                     opts[30] = ft->trim[2];
-                    log("[选项] 使用查表 trim（未校准）: freq=" +
-                        std::to_string(ft->freq) + " Hz, trim=" +
-                        HexW(ft->trim[0]) + " " + HexW(ft->trim[1]) + " " +
-                        HexW(ft->trim[2]));
+                    log(I18n::Tr(I18n::Msg::LogOptionsTrimTable, { "options",
+                        std::to_string(ft->freq), HexW(ft->trim[0]),
+                        HexW(ft->trim[1]), HexW(ft->trim[2]) }));
                 }
                 else {
-                    log("[选项] 警告：无校准值与查表项，trim 保持占位值");
+                    log(I18n::Tr(I18n::Msg::LogOptionsTrimUnmeasured, "options"));
                 }
             }
             else {
@@ -377,10 +374,9 @@ namespace stc {
                 opts[39] = m_status.msr[4];
             }
 
-            log("[选项] EEPROM=" + std::to_string(m_eepromBytes) +
-                ", 总容量=" + std::to_string(m_chipTotalBytes) +
-                ", opts[39]=0x" + HexW(opts[39]) +
-                " (code=" + std::to_string((uint32_t)opts[39] * 256) + ")");
+            log(I18n::Tr(I18n::Msg::LogOptionsEeprom, { "options",
+                std::to_string(m_eepromBytes), std::to_string(m_chipTotalBytes),
+                HexW(opts[39]), std::to_string((uint32_t)opts[39] * 256) }));
 
             std::vector<uint8_t> pl = { 0x04, 0x00, 0x00 };
             if (Params().need5AA5) { pl.push_back(0x5A); pl.push_back(0xA5); }
@@ -388,13 +384,13 @@ namespace stc {
 
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x04: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x04", HexDump(tx) }));
 
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
+            if (!WaitPacket(uart, rxBuf, r, 3000)) { log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false; }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
             if (r.size() < 2 || r[0] != 0x04 || r[1] != 0x54) {
-                log("[6/7] 选项响应异常"); return false;
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
             }
             return true;
         }
@@ -452,6 +448,15 @@ namespace stc {
                 // linearly with the IRC frequency: interpolating between
                 // 40 MHz (0x73) and 48 MHz (0xC6) gives ~0xA6 for 45 MHz.
                 { 45000000, 0x00, { 0xA6, 0x30,  1 } },
+
+                // 45.1584 is where the 8H/8051U menu ends and is not the same
+                // point as 8A's 45.000. It is exactly 11.0592 x 4, i.e. the
+                // 11.0592 in-band point scaled into the 44 MHz band, which is
+                // where trim[0] = 0xA9 comes from. On this transport the triple
+                // is a fallback anyway -- the calibration handshake measures
+                // the real IRC and overrides it -- but a serial-only part that
+                // fails calibration must still not be left with 45.000.
+                { 45158400, 0x00, { 0xA9, 0x30,  1 } },
 
                 // Overclock range.
                 //
@@ -566,21 +571,21 @@ namespace stc {
             auto pkt1Bytes = BuildPacket(pkt1);
             uart.Write(pkt1Bytes);
 
-            log("[校准] STC8G 目标 " + std::to_string(userSpeed / 1000) +
-                " kHz，第一轮读频段边界");
-            log("[发送] 0x00 0x05: " + HexDump(pkt1Bytes));
+            log(I18n::Tr(I18n::Msg::LogHidTargetFreq,
+                { "calibration", std::to_string(userSpeed / 1000) }));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x05", HexDump(pkt1Bytes) }));
 
             if (!PulseUntilData(uart, 0x66, 2000, rxBuf)) {
-                log("[校准] 第一轮无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1NoResponse, "calibration")); return false;
             }
 
             std::vector<uint8_t> resp1;
             if (!WaitPacket(uart, rxBuf, resp1, 2000)) {
-                log("[校准] 第一轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1ReadFailed, "calibration")); return false;
             }
-            log("[接收] resp1: " + HexDump(resp1));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp1", HexDump(resp1) }));
             if (resp1.size() < 12 || resp1[0] != 0x00) {
-                log("[校准] 第一轮响应异常"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound1BadReply, "calibration")); return false;
             }
 
             uint32_t freq1 = (uint32_t)read_u16(resp1, 2) * 2400u;
@@ -589,12 +594,11 @@ namespace stc {
             uint32_t freq4 = (uint32_t)read_u16(resp1, 8) * 2400u;
             uint32_t freq5 = (uint32_t)read_u16(resp1, 10) * 2400u;
 
-            log("[校准] 频段边界: " +
-                std::to_string(freq1 / 1000) + " / " +
-                std::to_string(freq2 / 1000) + " / " +
-                std::to_string(freq3 / 1000) + " / " +
-                std::to_string(freq4 / 1000) + " / " +
-                std::to_string(freq5 / 1000) + " kHz");
+            log(I18n::Tr(I18n::Msg::LogBandBoundaries, {
+                "calibration",
+                std::to_string(freq1 / 1000), std::to_string(freq2 / 1000),
+                std::to_string(freq3 / 1000), std::to_string(freq4 / 1000),
+                std::to_string(freq5 / 1000) }));
 
             uint32_t osc_div = 1;
             while ((uint64_t)userSpeed * osc_div < freq1) osc_div++;
@@ -610,7 +614,8 @@ namespace stc {
                     osc_trimx = (int)(t + 0.5);
                 }
                 osc_bandx = 0x00;
-                log("[校准] 选择频带 1 (band=0x00)");
+                log(I18n::Tr(I18n::Msg::LogBandChosen,
+                    { "calibration", "1", HexW((uint8_t)osc_bandx) }));
             }
             else {
                 if (freq4 != freq3) {
@@ -619,15 +624,16 @@ namespace stc {
                     osc_trimx = (int)(t + 0.5);
                 }
                 osc_bandx = 0x80;
-                log("[校准] 选择频带 2 (band=0x80)");
+                log(I18n::Tr(I18n::Msg::LogBandChosen,
+                    { "calibration", "2", HexW((uint8_t)osc_bandx) }));
             }
 
             if (osc_trimx < 0)   osc_trimx = 0;
             if (osc_trimx > 255) osc_trimx = 255;
 
-            log("[校准] osc_div=" + std::to_string(osc_div) +
-                ", osc_trimx=" + std::to_string(osc_trimx) +
-                ", osc_bandx=0x" + HexW((uint8_t)osc_bandx));
+            log(I18n::Tr(I18n::Msg::LogOscParams, { "calibration",
+                std::to_string(osc_div), std::to_string(osc_trimx),
+                HexW((uint8_t)osc_bandx) }));
 
             const int COUNT = 24;
             std::vector<uint8_t> pkt2 = { 0x00, (uint8_t)COUNT };
@@ -643,19 +649,19 @@ namespace stc {
             }
             auto pkt2Bytes = BuildPacket(pkt2);
             uart.Write(pkt2Bytes);
-            log("[发送] 0x00 0x18 (24 组): " + HexDump(pkt2Bytes));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x00 0x18 (24 groups)", HexDump(pkt2Bytes) }));
 
             if (!PulseUntilData(uart, 0x66, 2000, rxBuf)) {
-                log("[校准] 第二轮无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2NoResponse, "calibration")); return false;
             }
 
             std::vector<uint8_t> resp2;
             if (!WaitPacket(uart, rxBuf, resp2, 2000)) {
-                log("[校准] 第二轮读包失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2ReadFailed, "calibration")); return false;
             }
-            log("[接收] resp2: " + HexDump(resp2));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp2", HexDump(resp2) }));
             if (resp2.size() < (size_t)(2 + COUNT * 2) || resp2[0] != 0x00) {
-                log("[校准] 第二轮响应长度不足"); return false;
+                log(I18n::Tr(I18n::Msg::LogRound2ShortReply, "calibration")); return false;
             }
 
             uint64_t target_scaled = (uint64_t)userSpeed * osc_div;
@@ -693,14 +699,15 @@ namespace stc {
 
             double err_pct = 100.0 * ((double)actual_freq - (double)userSpeed)
                 / (double)userSpeed;
-            char ebuf[128];
-            std::snprintf(ebuf, sizeof(ebuf),
-                "[校准] 最优 idx=%d, trim=%u, band=0x%02X, "
-                "实际 %.4f MHz, 误差 %+.3f%%",
-                bestIdx, (unsigned)final_trim, (unsigned)final_band,
-                actual_freq / 1e6, err_pct);
-            log(ebuf);
-
+            // The numbers are formatted here rather than with snprintf: the
+            // message table owns the wording, including which way the error is
+            // signed, so a translation can put them where its grammar wants.
+            char errbuf[32];
+            std::snprintf(errbuf, sizeof(errbuf), "%+.3f", err_pct);
+            log(I18n::Tr(I18n::Msg::LogBestTrim, {
+                "calibration", std::to_string(bestIdx),
+                std::to_string((unsigned)final_trim), HexW(final_band),
+                newisp::FormatDouble(actual_freq / 1e6, 4), errbuf }));
             double brtD = 65536.0 - 24e6 / ((double)targetBaud * 4.0);
             uint16_t brt = (uint16_t)((int)(brtD + 0.5) & 0xFFFF);
 
@@ -712,21 +719,21 @@ namespace stc {
             };
             auto pkt3Bytes = BuildPacket(pkt3);
             uart.Write(pkt3Bytes);
-            log("[发送] 0x01: " + HexDump(pkt3Bytes));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x01", HexDump(pkt3Bytes) }));
 
             std::vector<uint8_t> resp3;
             if (!WaitPacket(uart, rxBuf, resp3, 2000)) {
-                log("[校准] 切波特率无响应"); return false;
+                log(I18n::Tr(I18n::Msg::LogNoResponse, { "calibration", "0x01" })); return false;
             }
-            log("[接收] resp3: " + HexDump(resp3));
+            log(I18n::Tr(I18n::Msg::LogRx, { "resp3", HexDump(resp3) }));
             if (resp3.empty() || resp3[0] != 0x01) return false;
 
             if (!uart.SetBaudRate(targetBaud)) {
-                log("[校准] 主机切波特率失败"); return false;
+                log(I18n::Tr(I18n::Msg::LogHostBaudSwitchFailed, "calibration")); return false;
             }
-            log("[校准] 主机已切到 " + std::to_string(targetBaud));
+            log(I18n::Tr(I18n::Msg::LogHostBaudSwitched, { "calibration", std::to_string(targetBaud) }));
 
-            log("[校准] STC8G 校准成功");
+            log(I18n::Tr(I18n::Msg::LogCalibrationOk, "calibration"));
             return true;
         }
     };

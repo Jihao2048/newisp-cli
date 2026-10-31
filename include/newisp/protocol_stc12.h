@@ -14,7 +14,9 @@ namespace stc {
         std::string ClockSourceText() const override {
             // Generic 12-series layout: clock source is msr[1] bit1
             // (options.py:297); 1 = external crystal, 0 = internal RC.
-            return (m_status.msr[1] & 0x02) ? "外部" : "内部";
+            return I18n::Tr((m_status.msr[1] & 0x02)
+                ? I18n::Msg::LogClockSourceExternal
+                : I18n::Msg::LogClockSourceInternal);
         }
 
         ProtocolParams Params() const override {
@@ -66,7 +68,7 @@ namespace stc {
 
             int brt_i = 256 - (int)((m_status.clockHz + targetBaud * 8) / (targetBaud * 16));
             if (brt_i <= 1 || brt_i > 255) {
-                log("[校准] 目标波特率无法设置"); return false;
+                log(I18n::Tr(I18n::Msg::LogBaudRateFailed, "calibration")); return false;
             }
             uint8_t brt = (uint8_t)brt_i;
             uint8_t brtCsum = (uint8_t)((2 * (256 - brt)) & 0xFF);
@@ -81,10 +83,12 @@ namespace stc {
                 };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x50: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x50", HexDump(tx) }));
                 std::vector<uint8_t> r;
-                if (!WaitPacket(uart, rxBuf, r, 2000) || r.empty() || r[0] != 0x8f) {
-                    log("[校准] 握手首包无响应或响应错"); return false;
+                if (!WaitPacket(uart, rxBuf, r, 2000) ||
+                    r.empty() || r[0] != 0x8f) {
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x50" }));
+                    return false;
                 }
             }
 
@@ -92,14 +96,14 @@ namespace stc {
                 std::vector<uint8_t> pl = { 0x8f, 0xc0, brt, 0x3f, brtCsum, delay, iap };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x8F: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x8F", HexDump(tx) }));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 std::vector<uint8_t> r;
                 bool ok = WaitPacket(uart, rxBuf, r, 2000);
                 uart.SetBaudRate(2400);
                 if (!ok || r.empty() || r[0] != 0x8f) {
-                    log("[校准] 0x8F 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x8F" })); return false;
                 }
             }
 
@@ -107,17 +111,17 @@ namespace stc {
                 std::vector<uint8_t> pl = { 0x8e, 0xc0, brt, 0x3f, brtCsum, delay };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x8E: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x8E", HexDump(tx) }));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 std::vector<uint8_t> r;
                 bool ok = WaitPacket(uart, rxBuf, r, 2000);
                 if (!ok || r.empty() || r[0] != 0x84) {
-                    log("[校准] 0x8E 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x8E" })); return false;
                 }
             }
 
-            log("[校准] STC12 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -135,9 +139,13 @@ namespace stc {
             for (int i = 0x80; i > 0x0D; --i) pl.push_back((uint8_t)i);
             uart.Write(BuildPacket(pl));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            if (r.empty() || r[0] != 0x00) { log("[4/7] 擦除包错误"); return false; }
-            // stcgal: 部分 BSL 只在擦除包里回 UID
+            if (!WaitPacket(uart, rxBuf, r, 5000)) {
+                log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false;
+            }
+            if (r.empty() || r[0] != 0x00) {
+                log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false;
+            }
+            // stcgal: some BSLs return the UID only in the erase reply.
             if (r.size() >= 8) m_uid.assign(r.begin() + 1, r.begin() + 8);
             return true;
         }
@@ -162,11 +170,13 @@ namespace stc {
                 uart.Write(BuildPacket(pl));
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时");
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout,
+                        { "5/7", std::to_string(blk) }));
                     return false;
                 }
                 if (r.empty() || r[0] != 0x00) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常");
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply,
+                        { "5/7", std::to_string(blk) }));
                     return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
@@ -175,7 +185,9 @@ namespace stc {
                 (uint8_t)(m_status.magic >> 8), (uint8_t)(m_status.magic & 0xFF) };
             uart.Write(BuildPacket(pf));
             std::vector<uint8_t> rf;
-            if (!WaitPacket(uart, rxBuf, rf, 2000)) { log("[5/7] 结束包超时"); return false; }
+            if (!WaitPacket(uart, rxBuf, rf, 2000)) {
+                log(I18n::Tr(I18n::Msg::LogFinishTimeout, "5/7")); return false;
+            }
             return true;
         }
 
@@ -218,20 +230,32 @@ namespace stc {
             pl.push_back((uint8_t)((clk >> 8) & 0xFF));
             pl.push_back((uint8_t)(clk & 0xFF));
 
-            log("[选项] MSR=" + HexDump({ m_status.msr[0], m_status.msr[1],
-                m_status.msr[2], m_status.msr[3] }) +
-                "(时钟源=" + std::string((m_status.msr[1] & 0x02) ? "外部" : "内部") +
-                ", 看门狗=" + std::string((m_status.msr[2] & 0x20) ? "关" : "开") + ")");
+            const std::string clockSource = I18n::Tr((m_status.msr[1] & 0x02)
+                ? I18n::Msg::LogClockSourceExternal
+                : I18n::Msg::LogClockSourceInternal);
+            const std::string watchdog = I18n::Tr((m_status.msr[2] & 0x20)
+                ? I18n::Msg::LogWatchdogOff
+                : I18n::Msg::LogWatchdogOn);
+
+            log(I18n::Tr(I18n::Msg::LogOptionsMsr, {
+                "options",
+                HexDump({ m_status.msr[0], m_status.msr[1],
+                    m_status.msr[2], m_status.msr[3] }),
+                clockSource, watchdog }));
 
             uart.Write(BuildPacket(pl));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            if (r.empty() || r[0] != 0x50) { log("[6/7] 选项响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 3000)) {
+                log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false;
+            }
+            if (r.empty() || r[0] != 0x50) {
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
+            }
 
-            // 擦除包里没带 UID 时，UID 在这个响应包里
+            // stcgal: 擦除包里没带 UID 时，UID 在这个响应包里
             if (m_uid.empty() && r.size() >= 25) {
                 m_uid.assign(r.begin() + 18, r.begin() + 25);
-                log("[UID] " + HexDump(m_uid));
+                log(I18n::Tr(I18n::Msg::LogUid, { "", "\b" + HexDump(m_uid) }));
             }
 
             // stcgal: STC-ISP 对新版 BSL 会额外发一个 0x50，期待 0x10
@@ -239,10 +263,10 @@ namespace stc {
                 uart.Write(BuildPacket({ 0x50 }));
                 std::vector<uint8_t> r2;
                 if (!WaitPacket(uart, rxBuf, r2, 2000)) {
-                    log("[6/7] 选项收尾包超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogOptionsTailTimeout, "6/7")); return false;
                 }
                 if (r2.empty() || r2[0] != 0x10) {
-                    log("[6/7] 选项收尾包响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogOptionsTailBadReply, "6/7")); return false;
                 }
             }
             return true;
@@ -261,7 +285,9 @@ namespace stc {
         // The "A" layout keeps the same bit but in msr[0] instead of msr[1]
         // (options.py:366); ProgramOptions writes it to pl[1].
         std::string ClockSourceText() const override {
-            return (m_status.msr[0] & 0x02) ? "外部" : "内部";
+            return I18n::Tr((m_status.msr[0] & 0x02)
+                ? I18n::Msg::LogClockSourceExternal
+                : I18n::Msg::LogClockSourceInternal);
         }
 
         ProtocolParams Params() const override {
@@ -312,7 +338,7 @@ namespace stc {
 
             int brt_i = 256 - (int)((m_status.clockHz + targetBaud * 8) / (targetBaud * 16));
             if (brt_i <= 1 || brt_i > 255) {
-                log("[校准] 目标波特率无法设置"); return false;
+                log(I18n::Tr(I18n::Msg::LogBaudRateFailed, "calibration")); return false;
             }
             uint8_t brt = (uint8_t)brt_i;
             uint8_t brtCsum = (uint8_t)((2 * (256 - brt)) & 0xFF);
@@ -323,14 +349,14 @@ namespace stc {
                 std::vector<uint8_t> pl = { 0x8f, 0xc0, brt, 0x3f, brtCsum, delay, iap };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x8F: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x8F", HexDump(tx) }));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 std::vector<uint8_t> r;
                 bool ok = WaitPacket(uart, rxBuf, r, 2000);
                 uart.SetBaudRate(2400);
                 if (!ok || r.empty() || r[0] != 0x8f) {
-                    log("[校准] 0x8F 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x8F" })); return false;
                 }
             }
 
@@ -338,13 +364,13 @@ namespace stc {
                 std::vector<uint8_t> pl = { 0x8e, 0xc0, brt, 0x3f, brtCsum, delay };
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                log("[发送] 0x8E: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x8E", HexDump(tx) }));
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 uart.SetBaudRate(targetBaud);
                 std::vector<uint8_t> r;
                 bool ok = WaitPacket(uart, rxBuf, r, 2000);
                 if (!ok || r.empty() || r[0] != 0x8e) {
-                    log("[校准] 0x8E 响应错"); return false;
+                    log(I18n::Tr(I18n::Msg::LogResponseBad, { "calibration", "0x8E" })); return false;
                 }
             }
 
@@ -358,15 +384,15 @@ namespace stc {
                     uart.Write(BuildPacket(ping));
                     std::vector<uint8_t> rp;
                     if (!WaitPacket(uart, rxBuf, rp, 2000)) {
-                        log("[校准] ping-pong 超时"); return false;
+                        log(I18n::Tr(I18n::Msg::LogPingTimeout, "calibration")); return false;
                     }
                     if (rp.empty() || rp[0] != 0x80) {
-                        log("[校准] ping-pong 响应错"); return false;
+                        log(I18n::Tr(I18n::Msg::LogPingBadReply, "calibration")); return false;
                     }
                 }
             }
 
-            log("[校准] STC12A 切波特率成功");
+            log(I18n::Tr(I18n::Msg::LogBaudSwitchOk, "calibration"));
             return true;
         }
 
@@ -410,24 +436,33 @@ namespace stc {
             pl.push_back((uint8_t)(clk & 0xFF));
             for (int i = 0; i < 3; ++i) pl.push_back(0xFF);
 
-            log("[选项] MSR=" + HexDump({ m_status.msr[0], m_status.msr[1],
-                m_status.msr[2], m_status.msr[3] }) +
-                "(时钟源=" + std::string((m_status.msr[0] & 0x02) ? "外部" : "内部") + ")");
+            const std::string clockSource = I18n::Tr((m_status.msr[0] & 0x02)
+                ? I18n::Msg::LogClockSourceExternal
+                : I18n::Msg::LogClockSourceInternal);
+            log(I18n::Tr(I18n::Msg::LogOptionsMsrClock, {
+                "options",
+                HexDump({ m_status.msr[0], m_status.msr[1],
+                    m_status.msr[2], m_status.msr[3] }),
+                clockSource }));
 
             uart.Write(BuildPacket(pl));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            if (r.empty() || r[0] != 0x80) { log("[6/7] 选项响应异常"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 3000)) {
+                log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false;
+            }
+            if (r.empty() || r[0] != 0x80) {
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
+            }
 
             // stcgal: STC-ISP 对新版 BSL 会额外发一个 0x50，期待 0x10
             if (m_status.bslVersion >= 0x66) {
                 uart.Write(BuildPacket({ 0x50 }));
                 std::vector<uint8_t> r2;
                 if (!WaitPacket(uart, rxBuf, r2, 2000)) {
-                    log("[6/7] 选项收尾包超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogOptionsTailTimeout, "6/7")); return false;
                 }
                 if (r2.empty() || r2[0] != 0x10) {
-                    log("[6/7] 选项收尾包响应异常"); return false;
+                    log(I18n::Tr(I18n::Msg::LogOptionsTailBadReply, "6/7")); return false;
                 }
             }
             return true;

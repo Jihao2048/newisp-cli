@@ -1,4 +1,4 @@
-﻿// Serial port enumeration, one implementation per platform.
+// Serial port enumeration, one implementation per platform.
 //
 // The channel implementations share termios between macOS and Linux, but
 // enumeration differs on all three: Windows walks the SetupAPI port class,
@@ -7,6 +7,7 @@
 // near-empty files.
 
 #include "newisp/serial_channel.h"
+#include "newisp/hid_channel.h"
 #include "newisp/text.h"
 
 #include <algorithm>
@@ -110,6 +111,57 @@ namespace {
         return std::string();
     }
 
+    // Vendor and product id from the device instance id.
+    //
+    // A USB port's instance id is "USB\VID_34BF&PID_FF09&MI_01\7&38123EBF&0&0001",
+    // so both ids are in the second component. Non-USB ports (an on-board
+    // 16550, a Bluetooth link) have no VID and leave both at zero, which is
+    // what tells the caller not to look for a HID sibling.
+    void ReadVidPid(HDEVINFO devInfo, SP_DEVINFO_DATA& devData,
+        uint16_t& vid, uint16_t& pid)
+    {
+        vid = 0;
+        pid = 0;
+
+        wchar_t buf[256] = { 0 };
+        if (!SetupDiGetDeviceInstanceIdW(devInfo, &devData, buf,
+            (DWORD)(sizeof(buf) / sizeof(buf[0])), nullptr)) {
+            return;
+        }
+
+        // Parse "VID_" + four hex digits and "PID_" + four hex digits. Using
+        // swscanf would drag in the whole wide CRT for one conversion.
+        const wchar_t* text = buf;
+        for (; *text; ++text) {
+            if (text[0] == L'V' && text[1] == L'I' && text[2] == L'D' &&
+                text[3] == L'_') {
+                unsigned value = 0;
+                const wchar_t* p = text + 4;
+                for (int i = 0; i < 4 && *p; ++i, ++p) {
+                    wchar_t c = *p;
+                    if (c >= L'0' && c <= L'9') value = value * 16 + (unsigned)(c - L'0');
+                    else if (c >= L'a' && c <= L'f') value = value * 16 + (unsigned)(c - L'a' + 10);
+                    else if (c >= L'A' && c <= L'F') value = value * 16 + (unsigned)(c - L'A' + 10);
+                    else break;
+                }
+                vid = (uint16_t)value;
+            }
+            if (text[0] == L'P' && text[1] == L'I' && text[2] == L'D' &&
+                text[3] == L'_') {
+                unsigned value = 0;
+                const wchar_t* p = text + 4;
+                for (int i = 0; i < 4 && *p; ++i, ++p) {
+                    wchar_t c = *p;
+                    if (c >= L'0' && c <= L'9') value = value * 16 + (unsigned)(c - L'0');
+                    else if (c >= L'a' && c <= L'f') value = value * 16 + (unsigned)(c - L'a' + 10);
+                    else if (c >= L'A' && c <= L'F') value = value * 16 + (unsigned)(c - L'A' + 10);
+                    else break;
+                }
+                pid = (uint16_t)value;
+            }
+        }
+    }
+
 } // namespace
 
     std::vector<SerialPortInfo> EnumerateSerialPorts()
@@ -130,13 +182,16 @@ namespace {
 
             SerialPortInfo info;
             info.device = port;
-            info.displayName = FriendlyName(devInfo, devData);
+            info.portName = FriendlyName(devInfo, devData);
+            info.displayName = info.portName;
             if (info.displayName.empty()) info.displayName = port;
+            ReadVidPid(devInfo, devData, info.vid, info.pid);
             result.push_back(std::move(info));
         }
 
         SetupDiDestroyDeviceInfoList(devInfo);
         SortPorts(result);
+        RefreshSerialPortIdentity(result);
         return result;
     }
 
@@ -311,3 +366,51 @@ namespace {
 } // namespace stcisp
 
 #endif
+
+// ===========================================================================
+//  USB product name, shared by the platform backends
+// ===========================================================================
+// A STC download board that exposes a USB-to-serial bridge presents two things
+// on one USB device: the CDC-ACM port(s) under the generic usbser.sys driver
+// and a HID interface whose product string is the name on the packaging
+// ("STC USB Serial"). The port's own name is whatever usbser.sys calls it,
+// which is localised and says nothing about the board, so the HID product
+// string is the useful name.
+//
+// Only platforms with a HID backend can answer this. The function lives
+// outside the per-platform #if so callers never need to know which case they
+// were built for: on Windows it consults the HID device list, and elsewhere it
+// returns immediately, leaving displayName alone.
+
+namespace stcisp {
+
+    void RefreshSerialPortIdentity(std::vector<SerialPortInfo>& ports)
+    {
+#if defined(_WIN32)
+        // Every HID device from this vendor, so the port and the HID interface
+        // can be matched on the vendor id alone. The product id differs by the
+        // interface's intended use (FF09 is the bridge, 1001 is the ISP
+        // interface), so matching on it would miss the case being fixed.
+        std::vector<HidDeviceInfo> hid = EnumerateHidDevices(STC_HID_VID, 0);
+        if (hid.empty()) return;
+
+        for (SerialPortInfo& port : ports) {
+            if (port.vid == 0) continue;   // not a USB device
+
+            for (const HidDeviceInfo& d : hid) {
+                if (d.vid != port.vid) continue;
+                if (d.displayName.empty()) continue;
+
+                // "STC USB Serial" + " (COM12)": the form the WinUI build
+                // shows in its device list, and the one a user compares
+                // against Device Manager.
+                port.displayName = d.displayName + " (" + port.device + ")";
+                break;
+            }
+        }
+#else
+        (void)ports;
+#endif
+    }
+
+} // namespace stcisp

@@ -1,4 +1,4 @@
-﻿#include "newisp/hex_file.h"
+#include "newisp/hex_file.h"
 
 #include <cstdio>
 #include <fstream>
@@ -120,10 +120,16 @@ namespace stc {
             return false;
         }
         // Use the actual keys, never cached min/max metadata as an authority.
+        //
+        // The address a code block is written at travels in two bytes, for
+        // every family: the STC8/STC32/8051U writer emits one 64-byte block per
+        // two-byte address. An image that reaches past 0xFFFF therefore cannot
+        // be represented on the wire, whatever the part is, and is refused here
+        // -- before any device is opened -- instead of being truncated.
         uint32_t last = image.data.rbegin()->first;
         if (last > 0xFFFFu) {
-            error = "extended/banked firmware is not supported by the 16-bit writer; "
-                    "no device opened, no erase issued (use inspect -f FILE)";
+            error = "image extends past 0xFFFF, which the 16-bit block address cannot "
+                    "reach; no device opened, no erase issued (use inspect -f FILE)";
             return false;
         }
         out.assign(static_cast<size_t>(last) + 1, 0xFF);

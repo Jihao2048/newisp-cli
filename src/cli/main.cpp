@@ -1,4 +1,4 @@
-﻿// newisp -- STC MCU programmer, cross-platform command line front end.
+// newisp -- STC MCU programmer, cross-platform command line front end.
 //
 // Ported from the WinUI application of the same name. The protocol, chip tables
 // and burn sequence are the same code, recompiled for Windows, macOS and Linux;
@@ -11,6 +11,7 @@
 #include "newisp/chip_table.h"
 #include "newisp/hex_file.h"
 #include "newisp/hid_channel.h"
+#include "newisp/i18n.h"
 #include "newisp/serial_channel.h"
 #include "newisp/session.h"
 #include "newisp/text.h"
@@ -102,48 +103,46 @@ namespace {
     // ---------------------------------------------------------------------
     //
     // The session layer emits two very different kinds of line: human progress
-    // ("[4/7] 擦除成功") and raw packet dumps ("[发送] 0x03: ..."). Verbose mode
-    // shows both, the default hides the dumps, and quiet shows only the output
-    // of the final summary. Filtering by prefix is crude but keeps the session
-    // code free of log levels, which is what the ported protocol layer expects.
+    // ("[4/7] erase complete") and raw packet dumps ("[send] 0x03: ...").
+    // Verbose shows both, Normal hides the dumps, and Quiet shows only what the
+    // summary needs.
+    //
+    // The kind travels with the line as a short marker that the i18n layer
+    // attaches when the message is built (see newisp/i18n.h). That is what
+    // makes this filter independent of the UI language -- the original port
+    // matched Chinese prefixes, which stops working the moment the text is
+    // translated.
     class Logger {
     public:
-        Logger(bool quiet, bool verbose)
-            : m_quiet(quiet), m_verbose(verbose)
-        {
-        }
+        explicit Logger(newisp::OutputLevel level) : m_level(level) {}
 
-        void operator()(const std::string& msg)
+        void operator()(const std::string& line)
         {
-            if (m_quiet && !IsImportant(msg)) return;
+            using newisp::i18n::LogKind;
+            using newisp::i18n::SplitLogLine;
+
+            LogKind kind = SplitLogLine(line).kind;
 
             // Packet dumps are noisy and only useful when debugging a
             // handshake, so they are opt-in.
-            if (!m_verbose && IsPacketDump(msg)) return;
+            if (kind == LogKind::Packet && m_level != newisp::OutputLevel::Verbose)
+                return;
 
-            std::cout << msg << '\n';
+            // Quiet keeps the findings a user must see even when everything
+            // asked for something short: errors, warnings and the attention
+            // notes the session raises.
+            if (m_level == newisp::OutputLevel::Quiet && kind == LogKind::Normal)
+                return;
+
+            std::cout << newisp::i18n::StripLogMarker(line) << '\n';
             std::cout.flush();
         }
 
+        bool Detailed() const { return m_level == newisp::OutputLevel::Verbose; }
+        bool Quiet() const { return m_level == newisp::OutputLevel::Quiet; }
+
     private:
-        static bool IsPacketDump(const std::string& m)
-        {
-            return m.rfind("[发送]", 0) == 0 ||
-                   m.rfind("[接收]", 0) == 0 ||
-                   m.rfind("     ", 0) == 0;
-        }
-
-        static bool IsImportant(const std::string& m)
-        {
-            return m.rfind("[失败]", 0) == 0 ||
-                   m.rfind("[提示]", 0) == 0 ||
-                   m.rfind("检测成功", 0) == 0 ||
-                   m.rfind("烧录完成", 0) == 0 ||
-                   m.rfind("芯片型号", 0) == 0;
-        }
-
-        bool m_quiet = false;
-        bool m_verbose = false;
+        newisp::OutputLevel m_level = newisp::OutputLevel::Normal;
     };
 
     // Progress goes to stderr so it cannot corrupt redirected stdout, and it
@@ -163,7 +162,8 @@ namespace {
 
             // "\033[K" clears to end of line so a shorter value does not leave
             // digits behind from the previous one.
-            std::cerr << "\r写入进度: " << std::setw(3) << percent << "%\033[K";
+            std::cerr << "\r" << newisp::i18n::Tr(newisp::i18n::Msg::ProgressWrite,
+                std::to_string(percent)) << "\033[K";
             std::cerr.flush();
             if (percent >= 100) std::cerr << '\n';
         }
@@ -174,21 +174,41 @@ namespace {
     };
 
     // ---------------------------------------------------------------------
-    //  Device selection
+    //  Device listing
     // ---------------------------------------------------------------------
+    //
+    // What `list` shows: which serial ports and which HID devices exist. No
+    // handshake is sent, nothing is opened, so it is instant and cannot disturb
+    // a board that is already in the ISP monitor.
 
     void PrintSerialPorts()
     {
         auto ports = stcisp::EnumerateSerialPorts();
         if (ports.empty()) {
-            std::cout << "未发现串口设备\n";
+            std::cout << newisp::i18n::Tr(newisp::i18n::Msg::CliNoSerialPorts) << "\n";
             return;
         }
-        std::cout << "串口设备 (" << ports.size() << "):\n";
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::CliSerialPorts,
+            std::to_string(ports.size())) << "\n";
+
+        // One row per port, in the shape "COM12  STC USB Serial", matching what
+        // the WinUI build shows in its device list: the port the user types,
+        // then the name of the thing behind it.
+        //
+        // A driver name that already ends in "(COM12)" would repeat the port,
+        // so the trailing parenthesised part is dropped before printing; that
+        // is what turns "BluetoothLE-Serial port (COM8)" into a name that sits
+        // in the same column as "STC USB Serial".
         for (const auto& p : ports) {
             std::cout << "  " << p.device;
-            if (!p.displayName.empty() && p.displayName != p.device)
-                std::cout << "  -- " << p.displayName;
+            std::string name = p.displayName;
+            const std::string suffix = " (" + p.device + ")";
+            if (name.size() > suffix.size() &&
+                name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                name.resize(name.size() - suffix.size());
+            }
+            if (!name.empty() && name != p.device)
+                std::cout << "  " << name;
             std::cout << '\n';
         }
     }
@@ -206,7 +226,7 @@ namespace {
     void PrintHidDevices(bool verbose)
     {
         if (!stcisp::HidSupported()) {
-            std::cout << "本版本未编译 USB HID 支持\n";
+            std::cout << newisp::i18n::Tr(newisp::i18n::Msg::CliHidNotBuilt) << "\n";
             return;
         }
 
@@ -214,9 +234,10 @@ namespace {
         auto isp = stcisp::EnumerateHidDevices(stcisp::STC_HID_VID,
             stcisp::STC_HID_PID);
 
-        std::cout << "STC ISP 设备 (VID " << newisp::Hex(stcisp::STC_HID_VID, 4)
-                  << " PID " << newisp::Hex(stcisp::STC_HID_PID, 4) << "): "
-                  << isp.size() << " 个\n";
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::CliStcIspDevices, {
+            newisp::Hex(stcisp::STC_HID_VID, 4),
+            newisp::Hex(stcisp::STC_HID_PID, 4),
+            std::to_string(isp.size()) }) << "\n";
         for (const auto& d : isp) {
             std::cout << "  " << newisp::FormatHidDevice(d) << '\n';
         }
@@ -236,9 +257,9 @@ namespace {
             // list above and cannot be opened as a COM port or a tty. It is
             // listed here so the device is accounted for rather than looking
             // like the tool missed it.
-            std::cout << "\n其它 STC HID 设备 (VID "
-                      << newisp::Hex(stcisp::STC_HID_VID, 4) << "，不含 ISP): "
-                      << other.size() << " 个\n";
+            std::cout << "\n" << newisp::i18n::Tr(newisp::i18n::Msg::CliOtherStcHid, {
+                          newisp::Hex(stcisp::STC_HID_VID, 4),
+                          std::to_string(other.size()) }) << "\n";
             for (const auto& d : other) {
                 std::cout << "  " << newisp::FormatHidDevice(d) << '\n';
             }
@@ -246,8 +267,7 @@ namespace {
 
         if (!verbose) {
             if (isp.empty() && other.empty()) {
-                std::cout << "\n未发现 STC 设备。若芯片已按 BOOT 上电，"
-                             "可用 -v 列出全部 HID 设备排查。\n";
+                std::cout << "\n" << newisp::i18n::Tr(newisp::i18n::Msg::CliNoStcDevices) << "\n";
             }
             return;
         }
@@ -257,12 +277,16 @@ namespace {
         // unexpected name is the whole point. The header repeats the count so
         // the list can be skipped at a glance.
         auto all = stcisp::EnumerateHidDevices(0, 0);
-        std::cout << "\n全部 HID 设备: " << all.size()
-                  << " 个（含鼠标、键盘等，仅供排查）\n";
+        std::cout << "\n" << newisp::i18n::Tr(newisp::i18n::Msg::CliAllHidDevices,
+                          std::to_string(all.size())) << "\n";
         for (const auto& d : all) {
             std::cout << "  " << newisp::FormatHidDevice(d) << '\n';
         }
     }
+
+    // ---------------------------------------------------------------------
+    //  Device selection
+    // ---------------------------------------------------------------------
 
     // Resolve which device to talk to.
     //
@@ -276,17 +300,17 @@ namespace {
 
         if (useHid) {
             if (!stcisp::HidSupported()) {
-                error = "本版本未编译 USB HID 支持，请使用 --serial 或重新编译";
+                error = newisp::i18n::Tr(newisp::i18n::Msg::CliErrNoHidSupport);
                 return false;
             }
             auto devs = stcisp::EnumerateHidDevices(stcisp::STC_HID_VID,
                 stcisp::STC_HID_PID);
             if (devs.empty()) {
-                error = "未发现 STC USB ISP 设备（请按住 BOOT 键重新上电）";
+                error = newisp::i18n::Tr(newisp::i18n::Msg::CliErrNoIspDevice);
                 return false;
             }
             if (devs.size() > 1) {
-                error = "发现多个 STC USB ISP 设备，请用 --device 指定：";
+                error = newisp::i18n::Tr(newisp::i18n::Msg::CliErrManyIspDevices);
                 for (const auto& d : devs)
                     error += "\n  " + newisp::FormatHidDevice(d);
                 return false;
@@ -297,12 +321,16 @@ namespace {
 
         auto ports = stcisp::EnumerateSerialPorts();
         if (ports.empty()) {
-            error = "未发现串口设备";
+            error = newisp::i18n::Tr(newisp::i18n::Msg::CliErrNoSerialPorts);
             return false;
         }
         if (ports.size() > 1) {
-            error = "发现多个串口设备，请用 --device 指定：";
-            for (const auto& p : ports) error += "\n  " + p.device;
+            error = newisp::i18n::Tr(newisp::i18n::Msg::CliErrManySerial);
+            for (const auto& p : ports) {
+                error += "\n  " + p.device;
+                if (!p.displayName.empty() && p.displayName != p.device)
+                    error += "  -- " + p.displayName;
+            }
             return false;
         }
         burn.deviceId = ports.front().device;
@@ -334,22 +362,27 @@ static int RunMain(const std::vector<std::string>& args)
     int rc = newisp::ParseCommandLine((int)args.size(),
         const_cast<char**>(argv.data()), opts, error);
     if (rc != 0) {
-        std::cerr << "错误: " << error << "\n\n"
+        std::cerr << newisp::i18n::Tr(newisp::i18n::Msg::CliErrPrefix, error) << "\n\n"
                   << newisp::UsageText(programName);
         return 2;
     }
 
     switch (opts.command) {
     case newisp::Command::None:
-        // No arguments: this is someone who ran the tool to see what it is, so
-        // show them what it can talk to and then how to use it. The device list
-        // doubles as a check that the drivers are in place -- if a board is
-        // plugged in and does not appear here, the problem is not this tool.
-        PrintSerialPorts();
-        std::cout << '\n';
-        PrintHidDevices(opts.verbose);
-        std::cout << '\n';
-        std::cout << newisp::UsageText(programName);
+        // No arguments: this is someone who ran the tool to find out what it
+        // is. Point them at the two commands that answer that -- help for the
+        // manual and detect to probe whatever is plugged in -- instead of
+        // dumping a device listing and the whole manual on a bare launch.
+        // Keep the prompt short by showing only the basename, the same way
+        // UsageText does for its own examples.
+        {
+            std::string name = programName;
+            size_t slash = name.find_last_of("/\\");
+            if (slash != std::string::npos && slash + 1 < name.size())
+                name = name.substr(slash + 1);
+            if (name.empty()) name = "newisp";
+            std::cout << newisp::i18n::Tr(newisp::i18n::Msg::CliInvite, name) << '\n';
+        }
         return 0;
 
     case newisp::Command::Help:
@@ -357,11 +390,12 @@ static int RunMain(const std::vector<std::string>& args)
         return 0;
 
     case newisp::Command::Version:
-        std::cout << "newisp " << NEWISP_VERSION << '\n'
-                  << "协议: STC89/90/10/11/12/15/8/8G/8H/32/8051U\n"
-                  << "传输: 串口"
+        std::cout << "newisp " << newisp::i18n::BuildVersion() << '\n'
+                  << newisp::i18n::Tr(newisp::i18n::Msg::VersionProtocols) << '\n'
 #if NEWISP_HAVE_HID
-                  << " + USB HID"
+                  << newisp::i18n::Tr(newisp::i18n::Msg::VersionTransportsHid)
+#else
+                  << newisp::i18n::Tr(newisp::i18n::Msg::VersionTransports)
 #endif
                   << '\n';
         return 0;
@@ -369,7 +403,7 @@ static int RunMain(const std::vector<std::string>& args)
     case newisp::Command::List:
         PrintSerialPorts();
         std::cout << '\n';
-        PrintHidDevices(opts.verbose);
+        PrintHidDevices(opts.output == newisp::OutputLevel::Verbose);
         return 0;
 
     case newisp::Command::Detect:
@@ -422,7 +456,14 @@ static int RunMain(const std::vector<std::string>& args)
     // ---- shared setup for detect and burn ----
     bool useHid = opts.burn.useHid;
     if (!ResolveDevice(opts.burn, useHid, error)) {
-        std::cerr << "错误: " << error << '\n';
+        if (opts.command == newisp::Command::Detect) {
+            // detect prints its error on stdout, the way it prints everything
+            // else: a script reading the answer should not have to merge
+            // streams to see why there was none.
+            std::cout << error << '\n';
+        } else {
+            std::cerr << newisp::i18n::Tr(newisp::i18n::Msg::CliErrPrefix, error) << '\n';
+        }
         return 1;
     }
 
@@ -434,13 +475,26 @@ static int RunMain(const std::vector<std::string>& args)
 #endif
 
     const bool tty = StdoutIsTty();
-    Logger log(opts.quiet, opts.verbose || !tty);
-    ProgressBar progress(tty && !opts.quiet);
+    // When stdout is not a terminal the packet dumps would be lost in a log
+    // file anyway, so a redirected run without an explicit -output is treated
+    // as verbose: dumps are cheap to grep and unreadable if dropped.
+    const newisp::OutputLevel level = (!opts.outputExplicit && !tty)
+        ? newisp::OutputLevel::Verbose
+        : opts.output;
+    Logger log(level);
+    ProgressBar progress(tty && !log.Quiet());
 
-    std::cout << "设备     : " << opts.burn.deviceId << '\n';
-    std::cout << "传输方式 : " << (useHid ? "USB HID" : "串口") << '\n';
+    std::cout << newisp::i18n::Tr(newisp::i18n::Msg::DeviceLine,
+                      opts.burn.deviceId) << '\n';
+    std::cout << newisp::i18n::Tr(newisp::i18n::Msg::TransportLine,
+                      useHid ? "USB HID"
+                             : newisp::i18n::Tr(newisp::i18n::Msg::TransportSerial))
+              << '\n';
 
     if (opts.command == newisp::Command::Detect) {
+        // Identify the chip and stop. Nothing about programming is decided
+        // here: no frequency, no EEPROM split, no option bytes are written, and
+        // the chip is released back to its user code afterwards.
         int r = newisp::RunDetect(opts.burn, log);
         return r;
     }
@@ -451,31 +505,32 @@ static int RunMain(const std::vector<std::string>& args)
     // characters (a Chinese directory name, say) comes out mangled. The stream
     // operators pass the UTF-8 bytes through unchanged, and the console code
     // page was already set to UTF-8 above.
-    std::cout << "固件     : " << opts.firmwarePath
-              << " (" << firmware.size() << " 字节, 地址 0x"
-              << newisp::Hex(image.minAddr, 4) << "-0x"
-              << newisp::Hex(image.maxAddr, 4) << ")\n";
+    std::cout << newisp::i18n::Tr(newisp::i18n::Msg::FirmwareLine, {
+                      opts.firmwarePath, std::to_string(firmware.size()),
+                      newisp::Hex(image.minAddr, 4),
+                      newisp::Hex(image.maxAddr, 4) }) << '\n';
 
     if (firmware.empty()) {
-        std::cerr << "错误: 固件为空\n";
+        std::cerr << newisp::i18n::Tr(newisp::i18n::Msg::CliFirmwareEmpty) << "\n";
         return 1;
     }
 
     if (opts.burn.targetFreq)
-        std::cout << "目标频率 : "
-                  << newisp::FormatDouble(opts.burn.targetFreq / 1e6, 4)
-                  << " MHz\n";
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::TargetFreqLine,
+                          newisp::FormatDouble(opts.burn.targetFreq / 1e6, 4)) << '\n';
     if (!useHid)
-        std::cout << "波特率   : " << opts.burn.baudRate << '\n';
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::BaudLine,
+                          std::to_string(opts.burn.baudRate)) << '\n';
     if (opts.burn.eepromBytes)
-        std::cout << "EEPROM   : " << opts.burn.eepromBytes << " 字节\n";
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::EepromLine,
+                          std::to_string(opts.burn.eepromBytes)) << '\n';
 
     int r = newisp::RunBurn(opts.burn, firmware, log, progress);
     if (r == 0) {
-        std::cout << "烧录成功\n";
+        std::cout << newisp::i18n::Tr(newisp::i18n::Msg::BurnSucceeded) << "\n";
     }
     else {
-        std::cerr << "烧录失败\n";
+        std::cerr << newisp::i18n::Tr(newisp::i18n::Msg::BurnFailed) << "\n";
     }
     return r;
 }

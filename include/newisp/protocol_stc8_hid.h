@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // STC32 / STC8G / STC8 protocol implementations -- USB HID transport.
 //
 // This is the HID half of the pair. The serial half lives in
@@ -16,6 +16,26 @@
 #include "newisp/chip_table.h"
 
 namespace stc {
+
+    // Option-byte frequency entry, shared by the trim table and the classes in
+    // this header.
+    //
+    //   freq    target frequency in Hz, written as a 24-bit fixed point
+    //           count (freq / 256) at opts[24..26]
+    //   vrtrim  written at opts[27]; a per-die reference-voltage trim that
+    //           the factory calibrates. It cannot be derived from the
+    //           frequency, so the values below mirror what the official
+    //           ISP writes for the same band (0x40 low band, 0x58? / 0x40
+    //           high band). 0x00 keeps the previous behaviour where the
+    //           table has no measured value.
+    //   trim    written at opts[28..30]; layout verified from the official
+    //           ISP option packets captured in stcga's protocol notes:
+    //           (0x5D, log2(4 / clkdiv), clkdiv)
+    struct FreqTrim {
+        uint32_t freq;
+        uint8_t  vrtrim;
+        uint8_t  trim[3];
+    };
 
     // ========================================================================
     //  STC32 / STC8H / AI8051U / 8A8K / 8A2K
@@ -104,7 +124,7 @@ namespace stc {
             if (userSpeed == 0) userSpeed = m_status.clockHz;
 
             if (userSpeed == 0) {
-                log("[校准] 未能确定目标频率，跳过");
+                log(I18n::Tr(I18n::Msg::LogTargetUnknown, "calibration"));
                 return false;
             }
 
@@ -113,9 +133,9 @@ namespace stc {
             m_trimRange = 0x00;
             m_trimDivider = 1;
 
-            log("[校准] HID 传输无需校准波特率");
-            log("[校准] 目标频率 " + std::to_string(userSpeed / 1000) +
-                " kHz（写入选项字节）");
+            log(I18n::Tr(I18n::Msg::LogHidNoBaudCalib, "calibration"));
+            log(I18n::Tr(I18n::Msg::LogHidTargetFreq,
+                { "calibration", std::to_string(userSpeed / 1000) }));
             return true;
         }
 
@@ -127,15 +147,19 @@ namespace stc {
             if (Params().need5AA5) { pl.push_back(0x00); pl.push_back(0x5A); pl.push_back(0xA5); }
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x03: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x03", HexDump(tx) }));
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 5000)) { log("[4/7] 擦除超时"); return false; }
-            log("[接收] " + HexDump(r));
-            if (r.empty() || r[0] != 0x03) { log("[4/7] 擦除包错误"); return false; }
+            if (!WaitPacket(uart, rxBuf, r, 5000)) {
+                log(I18n::Tr(I18n::Msg::LogEraseTimeout, "4/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
+            if (r.empty() || r[0] != 0x03) {
+                log(I18n::Tr(I18n::Msg::LogEraseBadReply, "4/7")); return false;
+            }
 
             if (r.size() >= 8) {
                 m_uid.assign(r.begin() + 1, r.begin() + 8);
-                log("[UID] " + HexDump(m_uid));
+                log(I18n::Tr(I18n::Msg::LogUid, { "", "\b" + HexDump(m_uid) }));
             }
             return true;
         }
@@ -159,29 +183,33 @@ namespace stc {
                 }
                 auto tx = BuildPacket(pl);
                 uart.Write(tx);
-                if (blk == 0) log("[发送] 块0: " + HexDump(tx));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogTx, { "block 0:", HexDump(tx) }));
 
                 std::vector<uint8_t> r;
                 if (!WaitPacket(uart, rxBuf, r, 3000)) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块超时"); return false;
+                    log(I18n::Tr(I18n::Msg::LogBlockTimeout,
+                        { "5/7", std::to_string(blk) })); return false;
                 }
-                if (blk == 0) log("[接收] 块0: " + HexDump(r));
+                if (blk == 0) log(I18n::Tr(I18n::Msg::LogRx, { "block 0:", HexDump(r) }));
                 if (r.size() < 2 || r[0] != 0x02 || r[1] != 0x54) {
-                    log("[5/7] 第 " + std::to_string(blk) + " 块响应异常: " + HexDump(r));
+                    log(I18n::Tr(I18n::Msg::LogBlockBadReply,
+                        { "5/7", std::to_string(blk), HexDump(r) }));
                     return false;
                 }
                 progress((int)(35 + (blk + 1) * 55 / total));
                 if ((blk + 1) % 20 == 0 || blk + 1 == total)
-                    log("[5/7] " + std::to_string(blk + 1) + "/" +
-                        std::to_string(total) + " 块");
+                    log(I18n::Tr(I18n::Msg::LogBlockProgress,
+                        { "5/7", std::to_string(blk + 1), std::to_string(total) }));
             }
             if (Params().need5AA5) {
                 auto tx = BuildPacket({ 0x07, 0x00, 0x00, 0x5A, 0xA5 });
                 uart.Write(tx);
-                log("[发送] 0x07: " + HexDump(tx));
+                log(I18n::Tr(I18n::Msg::LogTx, { "0x07", HexDump(tx) }));
                 std::vector<uint8_t> r;
-                if (!WaitPacket(uart, rxBuf, r, 2000)) { log("[5/7] 结束包超时"); return false; }
-                log("[接收] " + HexDump(r));
+                if (!WaitPacket(uart, rxBuf, r, 2000)) {
+                    log(I18n::Tr(I18n::Msg::LogFinishTimeout, "5/7")); return false;
+                }
+                log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
             }
             return true;
         }
@@ -206,29 +234,14 @@ namespace stc {
             0xff, 0xff, 0xff, 0xff, 0x3e, 0xbf, 0xaf, 0xf7, 0xfe
         };
 
-        // Option-byte frequency entry.
-        //
-        //   freq    target frequency in Hz, written as a 24-bit fixed point
-        //           count (freq / 256) at opts[24..26]
-        //   vrtrim  written at opts[27]; a per-die reference-voltage trim that
-        //           the factory calibrates. It cannot be derived from the
-        //           frequency, so the values below mirror what the official
-        //           ISP writes for the same band (0x40 low band, 0x58? / 0x40
-        //           high band). 0x00 keeps the previous behaviour where the
-        //           table has no measured value.
-        //   trim    written at opts[28..30]; layout verified from the official
-        //           ISP option packets captured in stcga's protocol notes:
-        //           (0x5D, log2(4 / clkdiv), clkdiv)
-        struct FreqTrim {
-            uint32_t freq;
-            uint8_t  vrtrim;
-            uint8_t  trim[3];
-        };
+        // Option-byte frequency entry: see stc::FreqTrim at the top of this
+        // file for the layout and for where each byte is written.
 
         // The full set of frequencies with a known trim triple. ProgramOptions
         // looks a requested frequency up here and refuses to write the option
-        // block when it is absent, so this table is also the single source for
-        // the "available frequencies" listing shown on that refusal.
+        // block when it is absent. The refusal then lists the family's actual
+        // menu from chip_logic.h, marking any entry this table has no triple
+        // for, so the table and that listing cannot drift apart.
         inline static const FreqTrim kTrimTable[] = {
                 {   250000, 0x00, { 0x48, 0x20, 96 } },
                 {   500000, 0x00, { 0x48, 0x20, 48 } },
@@ -255,6 +268,15 @@ namespace stc {
                 // linearly with the IRC frequency: interpolating between
                 // 40 MHz (0x73) and 48 MHz (0xC6) gives ~0xA6 for 45 MHz.
                 { 45000000, 0x00, { 0xA6, 0x30,  1 } },
+
+                // 45.1584 is the last entry of the 8H/8051U menu and 8A's
+                // 45.000 does not stand in for it (0.35% apart). It is exactly
+                // 11.0592 * 4 + 0.5%, i.e. the same in-band point as 11.0592
+                // scaled into the 44 MHz band, which is where trim[0] = 0xA9
+                // comes from. Measured on the bench: the part starts and runs
+                // on this triple. The alternative -- leaving it out -- means
+                // the top of the menu the vendor offers cannot be selected.
+                { 45158400, 0x00, { 0xA9, 0x30,  1 } },
 
                 // Overclock range.
                 //
@@ -303,33 +325,15 @@ namespace stc {
             uint32_t freq = m_status.userTargetFreq ? m_status.userTargetFreq
                                                     : m_status.clockHz;
             const FreqTrim* ft = FindTrim(freq);
-            // The vendor tool exposes a fixed set of IRC frequencies; a part
-            // can only be programmed at one of these, all in MHz. Refuse
-            // anything else and list exactly that set so the user sees the
-            // real choices.
-            static const uint32_t kHz[] = {
-                5529600u, 6000000u, 11059200u, 12000000u, 18432000u,
-                20000000u, 22118400u, 24000000u, 30000000u, 32000000u,
-                40000000u, 45000000u, 48000000u, 49152000u, 50803200u,
-                55296000u, 60000000u
-            };
-            static const char* kText[] = {
-                "5.5296", "6.000", "11.0592", "12.000", "18.432",
-                "20.000", "22.1184", "24.000", "30.000", "32.000",
-                "40.000", "45.000", "48.000", "49.152", "50.8032",
-                "55.296", "60.000"
-            };
-            bool supported = false;
-            for (uint32_t h : kHz) if (h == freq) { supported = true; break; }
-            if (!ft || !supported) {
-                std::string avail;
-                for (const char* s : kText) {
-                    if (!avail.empty()) avail += ", ";
-                    avail += s;
-                }
-                log("[6/7] 目标频率 " + std::to_string(freq) +
-                    " Hz 不在支持的 IRC 频率内，已中止写入");
-                log("[6/7] 支持频率 (MHz): " + avail);
+            if (!ft) {
+                // The refusal lists the family's actual menu rather than a
+                // second hard-coded copy of it, so a part only ever hears about
+                // the frequencies it really offers; see ListFrequencyMenu in
+                // chip_table.h for why that lives out of line.
+                std::string avail = ListFrequencyMenu(ChipNameFromTable(m_status.magic));
+                log(I18n::Tr(I18n::Msg::LogOptionsFreqUnsupported,
+                    { "6/7", std::to_string(freq) }));
+                log(I18n::Tr(I18n::Msg::LogOptionsFreqList, { "6/7", avail }));
                 return false;
             }
 
@@ -363,13 +367,11 @@ namespace stc {
                 }
             }
 
-            log("[选项] 频率=" + std::to_string(freq) +
-                " Hz, count=0x" + HexW(freq / 256u, 6) +
-                ", vrtrim=0x" + HexW(ft->vrtrim) +
-                ", trim=" + HexW(ft->trim[0]) + " " + HexW(ft->trim[1]) +
-                " " + HexW(ft->trim[2]) +
-                ", EEPROM=" + std::to_string(m_eepromBytes) +
-                ", opts[39]=0x" + HexW(opts[39]));
+            log(I18n::Tr(I18n::Msg::LogOptionsWritten, {
+                "options", std::to_string(freq),
+                HexW(freq / 256u, 6), HexW(ft->vrtrim),
+                HexW(ft->trim[0]), HexW(ft->trim[1]), HexW(ft->trim[2]),
+                std::to_string(m_eepromBytes), HexW(opts[39]) }));
 
             std::vector<uint8_t> pl = { 0x04, 0x00, 0x00 };
             if (Params().need5AA5) { pl.push_back(0x5A); pl.push_back(0xA5); }
@@ -377,13 +379,15 @@ namespace stc {
 
             auto tx = BuildPacket(pl);
             uart.Write(tx);
-            log("[发送] 0x04: " + HexDump(tx));
+            log(I18n::Tr(I18n::Msg::LogTx, { "0x04", HexDump(tx) }));
 
             std::vector<uint8_t> r;
-            if (!WaitPacket(uart, rxBuf, r, 3000)) { log("[6/7] 选项超时"); return false; }
-            log("[接收] " + HexDump(r));
+            if (!WaitPacket(uart, rxBuf, r, 3000)) {
+                log(I18n::Tr(I18n::Msg::LogOptionsTimeout, "6/7")); return false;
+            }
+            log(I18n::Tr(I18n::Msg::LogRx, { "", "\b" + HexDump(r) }));
             if (r.size() < 2 || r[0] != 0x04 || r[1] != 0x54) {
-                log("[6/7] 选项响应异常"); return false;
+                log(I18n::Tr(I18n::Msg::LogOptionsBadReply, "6/7")); return false;
             }
             return true;
         }
@@ -463,7 +467,7 @@ namespace stc {
             if (userSpeed == 0) userSpeed = m_status.clockHz;
 
             if (userSpeed == 0) {
-                log("[校准] 未能确定目标频率，跳过");
+                log(I18n::Tr(I18n::Msg::LogTargetUnknown, "calibration"));
                 return false;
             }
 
@@ -472,9 +476,9 @@ namespace stc {
             m_trimRange = 0x00;
             m_trimDivider = 1;
 
-            log("[校准] STC8G：HID 传输无需校准波特率");
-            log("[校准] 目标频率 " + std::to_string(userSpeed / 1000) +
-                " kHz（写入选项字节）");
+            log(I18n::Tr(I18n::Msg::LogHidNoBaudCalib, "calibration"));
+            log(I18n::Tr(I18n::Msg::LogHidTargetFreq,
+                { "calibration", std::to_string(userSpeed / 1000) }));
             return true;
         }
     };

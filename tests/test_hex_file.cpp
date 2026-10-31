@@ -1,4 +1,4 @@
-﻿// Intel HEX parser tests.
+// Intel HEX parser tests.
 
 #include "test.h"
 
@@ -177,7 +177,9 @@ namespace {
         std::vector<uint8_t> firmware{42};
         CHECK(!stc::BuildLinearFirmware(img, firmware, error));
         CHECK(firmware.empty());
-        CHECK(error.find("banked") != std::string::npos);
+        // The refusal is about the 16-bit block address, which is the same for
+        // every family, so the message names that limit rather than a family.
+        CHECK(error.find("0xFFFF") != std::string::npos);
         CHECK(ParseHexFile(Record(4, 0, {0xFF, 0xFF}) + Record(0, 0xFFFF, {7}) + eof, img));
         CHECK_EQ(img.data.size(), (size_t)1);
         CHECK_EQ(img.maxAddr, 0xFFFFFFFFu);

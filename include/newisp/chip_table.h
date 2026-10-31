@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // Chip ID (magic) to part name.
 //
 // Ported from the WinUI build. The table itself is untouched; only the string
@@ -114,7 +114,6 @@ static const std::unordered_map<uint16_t, const char*> kChipTable = {
     {0x77DB, "AI8C2K60S2"},
     {0x77DC, "AI8C2K64S2"},
     {0x77DD, "AI8C2K48S2"},
-    {0x77E0, "AI16F40K128BETA"},
     {0x77E3, "AI32G12K128"},
     {0x77E4, "AI32G12K64"},
     {0x77EE, "AIUSBLINK1"},
@@ -468,7 +467,6 @@ static const std::unordered_map<uint16_t, const char*> kChipTable = {
     {0xD35E, "STC11F60X"},
     {0xD35F, "IAP11F62X"},
     {0xD360, "D_STC08XE_5V"},
-    {0xD361, "STC16XE_5V"},
     {0xD362, "STC20XE_5V"},
     {0xD363, "IAP11F08XE"},
     {0xD364, "STC11F08XE"},
@@ -534,7 +532,6 @@ static const std::unordered_map<uint16_t, const char*> kChipTable = {
     {0xD3DE, "STC11L60X"},
     {0xD3DF, "IAP11L62X"},
     {0xD3E0, "D_STC08XE_3V"},
-    {0xD3E1, "STC16XE_3V"},
     {0xD3E2, "STC20XE_3V"},
     {0xD3E3, "IAP11L08XE"},
     {0xD3E4, "STC11L08XE"},
@@ -1284,7 +1281,6 @@ static const std::unordered_map<uint16_t, const char*> kChipTable = {
     {0xF7DB, "STC8C2K60S2"},
     {0xF7DC, "STC8C2K64S2"},
     {0xF7DD, "STC8C2K48S2"},
-    {0xF7E0, "STC16F40K128BETA"},
     {0xF7E1, "STC32G12K128BETA"},
     {0xF7E2, "STC32G12K64BETA"},
     {0xF7E3, "STC32G12K128"},
@@ -1388,4 +1384,28 @@ static const std::unordered_map<uint16_t, const char*> kChipTable = {
 std::string ChipNameFromTable(uint16_t magic);
 
 // The placeholder returned for an unrecognised chip ID.
+//
+// Part names are not translated, but this placeholder is prose shown to the
+// user, so it goes through the message table and therefore depends on the
+// active language at the time it is returned.
+std::string UnknownChipName();
+
+// Deprecated: the English spelling of UnknownChipName(). Kept because the
+// tests compare against it by name; prefer UnknownChipName().
 extern const char* const kUnknownChipName;
+
+// The family's IRC frequency menu, formatted for a log line: "5.5296, 6.0000,
+// ...".
+//
+// Out of line in chip_table.cpp on purpose. The menu lives in chip_logic.h,
+// which cannot be included from this header's users without a cycle:
+// chip_logic.h includes protocol_factory.h, which pulls in the protocol headers,
+// and protocol_stc8_hid.h is the one caller that needs this list. Declaring it
+// here -- next to ChipNameFromTable, which the caller already uses -- breaks
+// that cycle without moving the frequency data out of chip_logic.h, where
+// tests and the CLI look for it.
+//
+// Entries are listed exactly as the vendor menu offers them. The option stage
+// refuses any entry it has no trim triple for, naming the frequency it stopped
+// on, so an entry appearing here is not a promise that it can be burned yet.
+std::string ListFrequencyMenu(const std::string& chipName);

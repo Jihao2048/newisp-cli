@@ -214,7 +214,7 @@ def main():
     print(f"pty: {slave_name}")
     print(f"hex: {hex_path}")
 
-    cmd = [binary, "burn", "-f", hex_path, "-d", slave_name]
+    cmd = [binary, "burn", hex_path, "-d", slave_name]
     print("cmd: " + " ".join(cmd))
     print("=" * 62)
 

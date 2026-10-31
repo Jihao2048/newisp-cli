@@ -115,7 +115,7 @@ HID list from hidapi/IOKit, so a non-empty result means both APIs answered.
 
 To see everything:
 
-    ./build/newisp list -v
+    ./build/newisp list -output verbose
 
 
 ------------------------------------------------------------------------------
@@ -176,8 +176,8 @@ or the specific device. If you want to try:
 
   5. Then:
 
-         ./build/newisp detect --hid
-         ./build/newisp burn -f /path/to/ai8051u.hex --hid -F 45M
+         ./build/newisp detect -h
+         ./build/newisp burn /path/to/ai8051u.hex -h -F 45M
 
 For HID access as a normal user, no udev exists on macOS; the device is opened
 through IOKit and usually needs no special permission. If opening fails, check

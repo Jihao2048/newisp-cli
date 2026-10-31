@@ -29,7 +29,7 @@ def main():
     make_hex(hex_path, 256)
 
     proc = subprocess.run(
-        [binary, "burn", "-f", hex_path, "-d", name, "-F", "24M"],
+        [binary, "burn", hex_path, "-d", name, "-F", "24M"],
         capture_output=True, text=True, timeout=180)
 
     time.sleep(0.3)

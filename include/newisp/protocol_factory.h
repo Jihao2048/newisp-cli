@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <memory>
 #include <string>
 #include "newisp/chip_table.h"
@@ -98,11 +98,15 @@ namespace stc {
             starts("STC8051U") || starts("AI8051U"))
             return Stc32Proto(useHid);
 
-        // STC16 / 8A8K / 8A2K / STC8F / 8A / 8C / GX8S -- these have no USB
-        // interface, so useHid is false by construction; they always run over
-        // serial.
-        if (starts("STC16") || starts("AI16") ||
-            starts("STC8A8K") || starts("AI8A8K") ||
+        // 8A8K / 8A2K / STC8F / 8A / 8C / GX8S -- these have no USB interface,
+        // so useHid is false by construction; they always run over serial.
+        //
+        // STC16 used to be listed here. The family is out of production and the
+        // vendor no longer ships ISP material for it, so its entries were
+        // dropped from the chip table along with this branch: a chip that is
+        // not in the table still probes and still reports its ID, it just does
+        // not get a part name.
+        if (starts("STC8A8K") || starts("AI8A8K") ||
             starts("STC8A2K") || starts("AI8A2K"))
             return Stc32Proto(false);
 

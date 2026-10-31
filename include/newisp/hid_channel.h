@@ -17,12 +17,20 @@
 
 #include "newisp/IChannel.h"
 
-// Whether this build includes USB HID support. The build system defines it;
-// the default here is deliberately 0, so a translation unit that includes this
-// header without the build system's flags is told the truth (HID is absent)
-// rather than being handed a link error for symbols that do not exist.
+// USB HID support is no longer optional: the STC factory ISP interface is the
+// only transport for the 8051U family, so a build that silently omitted it
+// would be a build that cannot program part of the catalogue. Windows uses the
+// system HID class driver (hid.dll + SetupAPI, no external dependency); macOS
+// and Linux use hidapi, which is a hard requirement of the build there.
+//
+// NEWISP_HAVE_HID is kept as 1 so code written against the old optional flag
+// still compiles, but nothing in the project switches it off any more.
 #ifndef NEWISP_HAVE_HID
-#define NEWISP_HAVE_HID 0
+#define NEWISP_HAVE_HID 1
+#endif
+
+#if !NEWISP_HAVE_HID
+#error "USB HID support is required: the 8051U family can only be programmed over HID"
 #endif
 
 namespace stcisp {
@@ -42,11 +50,12 @@ namespace stcisp {
         uint16_t    pid = 0;
     };
 
-    // True when this build includes HID support.
+    // True when this build includes HID support. Always true now; the function
+    // stays because callers use it to report capability rather than to branch
+    // on a configuration that no longer exists.
     bool HidSupported();
 
     // Enumerate all HID devices matching vendor/product (0 = wildcard).
-    // Returns an empty vector when HID support is not compiled in.
     std::vector<HidDeviceInfo> EnumerateHidDevices(uint16_t vid, uint16_t pid);
 
     class HidChannel : public IChannel {

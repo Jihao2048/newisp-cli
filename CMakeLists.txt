@@ -1,4 +1,4 @@
-# 3.20 is the floor: it is what Ubuntu 22.04 ships and what the CMake versions
+﻿# 3.20 is the floor: it is what Ubuntu 22.04 ships and what the CMake versions
 # bundled with recent Visual Studio and Homebrew provide. CMake 4.x refuses
 # projects that ask for a policy version below 3.5, so this also keeps the build
 # working on the newest toolchains.
@@ -53,20 +53,42 @@ endif()
 # ---------------------------------------------------------------------------
 #  Options
 # ---------------------------------------------------------------------------
-# HID support. On Windows it needs nothing external: the backend talks to the
-# system HID class driver through hid.dll and SetupAPI, both of which ship with
-# the operating system. On macOS and Linux it uses hidapi, which is packaged
-# everywhere and wraps IOKit and hidraw respectively.
+# USB HID support is required, not optional. It is the only transport the 8051U
+# family has, so a build without it would be a build that cannot program part of
+# the catalogue -- and it would fail silently, at run time, on somebody's bench.
 #
-# On those two platforms hidapi is optional: if it is missing, the build still
-# succeeds and produces a serial-only binary that reports HID as unavailable.
-# That is deliberate -- a missing optional dependency should not be a link
-# error, and serial alone is a working tool.
+#   Windows      the backend talks to the system HID class driver through
+#                hid.dll and SetupAPI, both of which ship with the operating
+#                system, so nothing external is needed.
+#   macOS/Linux  hidapi, which wraps IOKit and hidraw. It is a hard dependency
+#                there: configure stops with an explanation instead of
+#                producing a partial tool.
 
-option(NEWISP_ENABLE_HID "Build the USB HID transport" ON)
 option(NEWISP_BUILD_TESTS "Build the unit tests" OFF)
 
-if(NEWISP_ENABLE_HID AND NOT WIN32)
+# The language this build speaks. Only that table is compiled in; the other
+# language is not in the binary. English is the source language of the message
+# table and Chinese is the project's primary audience, so both are first class:
+#
+#   cmake -DNEWISP_LANG=zh-CN   Chinese (default)
+#   cmake -DNEWISP_LANG=en      English
+#
+# To ship both, configure twice into two build directories.
+set(NEWISP_LANG "zh-CN" CACHE STRING "Output language: zh-CN or en")
+set_property(CACHE NEWISP_LANG PROPERTY STRINGS "zh-CN" "en")
+
+string(TOLOWER "${NEWISP_LANG}" NEWISP_LANG_LC)
+if(NEWISP_LANG_LC STREQUAL "zh-cn" OR NEWISP_LANG_LC STREQUAL "zh")
+    set(NEWISP_LANG_CODE_DEFINE NEWISP_LANG_CODE_CHINESE=1)
+elseif(NEWISP_LANG_LC STREQUAL "en" OR NEWISP_LANG_LC MATCHES "^en[-_]")
+    set(NEWISP_LANG_CODE_DEFINE NEWISP_LANG_CODE_ENGLISH=1)
+else()
+    message(FATAL_ERROR
+        "NEWISP_LANG must be zh-CN or en, got '${NEWISP_LANG}'")
+endif()
+message(STATUS "Output language: ${NEWISP_LANG}")
+
+if(NOT WIN32)
     find_package(hidapi QUIET)
     if(NOT hidapi_FOUND)
         # pkg-config fallback: most distributions ship hidapi this way and the
@@ -81,8 +103,10 @@ if(NEWISP_ENABLE_HID AND NOT WIN32)
     endif()
 
     if(NOT hidapi_FOUND AND NOT HIDAPI_FOUND)
-        message(STATUS "hidapi not found -- building without USB HID support")
-        set(NEWISP_ENABLE_HID OFF)
+        message(FATAL_ERROR
+            "hidapi is required: USB HID is the only transport for the 8051U "
+            "family. Install libhidapi-dev (Debian/Ubuntu), hidapi-devel "
+            "(Fedora) or 'brew install hidapi' (macOS).")
     endif()
 endif()
 
@@ -96,6 +120,7 @@ add_library(newisp_core STATIC
     src/core/chip_table.cpp
     src/core/chip_logic.cpp
     src/core/hex_file.cpp
+    src/core/i18n.cpp
 )
 
 target_include_directories(newisp_core
@@ -104,7 +129,22 @@ target_include_directories(newisp_core
         $<INSTALL_INTERFACE:include>
 )
 
+# The message tables live next to the translations they belong to, not in the
+# public header directory: text_en.inc is the reference table and src/i18n/
+# holds one file per language. i18n.cpp includes them by relative path, so only
+# the source directory has to be visible here.
+set_property(SOURCE src/core/i18n.cpp APPEND PROPERTY
+    OBJECT_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/newisp/text_en.inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/i18n/text_zh_cn.inc
+)
+
 target_compile_features(newisp_core PUBLIC cxx_std_17)
+
+# Only the selected language's table is compiled. This is a PRIVATE definition
+# because nothing outside i18n.cpp needs to know; public code asks Tr() for a
+# string instead of branching on the language.
+target_compile_definitions(newisp_core PRIVATE ${NEWISP_LANG_CODE_DEFINE})
 
 # The protocol layer is header-only and pulls in <thread>; nothing else is
 # needed on any of the three platforms.
@@ -119,9 +159,6 @@ target_link_libraries(newisp_core PUBLIC Threads::Threads)
 add_library(newisp_transport STATIC
     src/transport/serial_channel.cpp
     src/transport/serial_enum.cpp
-    # Compiled whether or not hidapi is available: without it the file provides
-    # stubs that report HID as unsupported, so the CLI always links and can say
-    # so plainly instead of failing with unresolved symbols.
     src/transport/hid_channel.cpp
 )
 
@@ -133,29 +170,21 @@ endif()
 
 target_link_libraries(newisp_transport PUBLIC newisp_core)
 
+# USB HID is part of the product, not a switch; see the Options section. The
+# definition is PUBLIC because newisp/hid_channel.h checks it.
+target_compile_definitions(newisp_transport PUBLIC NEWISP_HAVE_HID=1)
+
 # serial_channel_impl.h is a private header shared by the three transport
 # translation units, so the directory has to be on the include path.
 target_include_directories(newisp_transport PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/transport)
-
-if(NEWISP_ENABLE_HID)
-    target_compile_definitions(newisp_transport PUBLIC NEWISP_HAVE_HID=1)
-else()
-    # hid_channel.cpp is compiled either way and provides working stubs that
-    # report HID as unavailable, so the CLI links and can say so plainly.
-    target_compile_definitions(newisp_transport PUBLIC NEWISP_HAVE_HID=0)
-endif()
 
 if(WIN32)
     # The Windows HID backend links against the system HID class driver.
     # hid.lib carries both the HidD_* class accessors and the HidP_* report
     # parser (HidP_GetCaps); setupapi covers device enumeration. Neither needs
     # to be shipped, so the Windows build has no external dependency.
-    if(NEWISP_ENABLE_HID)
-        target_link_libraries(newisp_transport PRIVATE setupapi hid)
-    else()
-        target_link_libraries(newisp_transport PRIVATE setupapi)
-    endif()
+    target_link_libraries(newisp_transport PRIVATE setupapi hid)
 elseif(APPLE)
     # IOKit provides the serial device list on macOS.
     find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
@@ -164,7 +193,9 @@ elseif(APPLE)
         ${IOKIT_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
 endif()
 
-if(NEWISP_ENABLE_HID AND NOT WIN32)
+if(NOT WIN32)
+    # Required on these platforms; the configure step already failed if it is
+    # missing.
     if(hidapi_FOUND)
         # Target name differs between the CMake package and older releases.
         if(TARGET hidapi::hidapi)
@@ -195,8 +226,14 @@ add_executable(newisp
 
 target_link_libraries(newisp PRIVATE newisp_transport)
 
-# Version string for --version and the usage banner.
-target_compile_definitions(newisp PRIVATE
+# The version string is quoted here because the compile definition ends up in a
+# command line: without the escaped quotes MSVC would see NEWISP_VERSION=1.0.0
+# and reject it as an invalid numeric literal.
+#
+# It is defined on newisp_core rather than on the executable because i18n.cpp
+# is where it is wrapped into a plain const char* (i18n::BuildVersion) for
+# everyone else to use.
+target_compile_definitions(newisp_core PRIVATE
     NEWISP_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)

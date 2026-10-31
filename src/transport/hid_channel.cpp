@@ -22,6 +22,12 @@
 //   * There is no line coding and no reset line, so baud rate, parity, DTR and
 //     RTS are accepted and ignored -- but they report success, because a caller
 //     treating a normal HID session as a failure would abort the burn.
+//
+// HID is a required part of the product rather than an option: it is the only
+// transport the 8051U family has. The NEWISP_HAVE_HID guards below are kept
+// because they document which statements belong to hidapi, but the value is
+// fixed at 1 by newisp/hid_channel.h and the build fails to compile the stub
+// variants instead of quietly shipping a partial tool.
 
 #include "newisp/hid_channel.h"
 #include "newisp/text.h"
@@ -46,9 +52,10 @@ static const GUID NEWISP_GUID_DEVINTERFACE_HID =
 
 #else
 
-#if NEWISP_HAVE_HID
+// hidapi is a hard dependency on macOS and Linux. CMake fails the configure
+// step when it is missing, so reaching this #error means someone compiled a
+// translation unit without the include path the build sets up.
 #include <hidapi/hidapi.h>
-#endif
 
 #endif
 
@@ -455,11 +462,8 @@ namespace stcisp {
 
     bool HidSupported()
     {
-#if NEWISP_HAVE_HID
+        // HID is compiled in unconditionally; see newisp/hid_channel.h.
         return true;
-#else
-        return false;
-#endif
     }
 
     std::vector<HidDeviceInfo> EnumerateHidDevices(uint16_t vid, uint16_t pid)

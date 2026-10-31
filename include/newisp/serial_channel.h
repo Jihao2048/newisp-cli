@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // Serial transport for the classic STC ISP monitor.
 //
 // The WinUI build's UartChannel.cpp was pure Win32 (CreateFile/DCB/EscapeComm-
@@ -25,15 +25,44 @@
 namespace stcisp {
 
     // Descriptor of a discovered serial port.
+    //
+    // The three names exist because the operating system does not always know
+    // what a port belongs to:
+    //
+    //   device       the port itself: "COM7" or "/dev/ttyUSB0". Never changes.
+    //   displayName  what the user is meant to read. On Windows this starts a
+    //                driver-provided name and is upgraded to the USB product
+    //                string when the port is part of a USB device that also
+    //                exposes a HID interface (see RefreshSerialPortIdentity).
+    //   portName     the driver's own name, e.g. "USB 串行设备 (COM7)", kept
+    //                for diagnostics and for a fallback when nothing better
+    //                is known.
     struct SerialPortInfo {
         std::string device;       // "COM7" or "/dev/ttyUSB0"
         std::string displayName;  // human-readable, may equal device
+        std::string portName;     // driver-supplied name, may be empty
+        uint16_t    vid = 0;      // USB vendor id, 0 when not a USB device
+        uint16_t    pid = 0;      // USB product id, 0 when not a USB device
     };
 
     // Enumerate the serial ports currently present. On Windows this walks the
     // SetupAPI port class; on macOS it asks IOKit; on Linux it scans /dev for
     // the usual tty device names.
     std::vector<SerialPortInfo> EnumerateSerialPorts();
+
+    // Upgrade displayName using the names the HID side of the same USB device
+    // reports.
+    //
+    // A STC USB-to-serial bridge presents two interfaces on one USB device: a
+    // HID interface whose product string is "STC USB Serial", and one or more
+    // CDC-ACM ports driven by the generic usbser.sys, whose own name is the
+    // localised "USB 串行设备"/"USB Serial Device". The USB product string is
+    // the name the user knows the board by, so it is preferred whenever the
+    // port and a HID interface share a vendor id.
+    //
+    // called by EnumerateSerialPorts() on platforms where this applies, and
+    // exposed so the CLI can redo it after a HID rescan.
+    void RefreshSerialPortIdentity(std::vector<SerialPortInfo>& ports);
 
     class SerialChannel : public IChannel {
     public:
