@@ -355,6 +355,13 @@ namespace stc {
             opts.insert(opts.end(), BLOCK2, BLOCK2 + sizeof(BLOCK2));
 
             // EEPROM sizing occupies the last byte of BLOCK2 (opts[39]).
+            //
+            // When -eeprom was not given, keep whatever the chip reported: the
+            // handshake status packet carries the current split in msr[4] (see
+            // ParseStatus), and BLOCK2 alone would write its fixed 0xFE, i.e.
+            // claim ~64 KB of EEPROM and very little code -- a split nobody
+            // asked for. msr[4] == 0xFF means "not split", which is preserved
+            // as-is for the same reason.
             if (m_eepromBytes > 0) {
                 uint32_t totalFlash = m_chipTotalBytes;
                 if (totalFlash < 1024) totalFlash = 64 * 1024;
@@ -365,6 +372,9 @@ namespace stc {
                     codeSize = (codeSize / 256) * 256;
                     opts[39] = (uint8_t)(codeSize / 256);
                 }
+            }
+            else {
+                opts[39] = m_status.msr[4];
             }
 
             log(I18n::Tr(I18n::Msg::LogOptionsWritten, {

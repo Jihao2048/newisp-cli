@@ -1,4 +1,4 @@
-// Command-line parsing.
+﻿// Command-line parsing.
 //
 // Hand-written rather than pulled from a library: the option set is small, the
 // tool has to build with nothing but a C++17 compiler, and a dependency here
@@ -429,6 +429,11 @@ namespace newisp {
             p = p.substr(slash + 1);
         if (p.empty()) p = "newisp";
 
+        // The examples spell the command as "newisp" rather than as the invoked
+        // file name: they are meant to be read and typed, and "newisp.exe" or a
+        // relocated binary name only adds noise at the end of the block.
+        const std::string base = "newisp";
+
         // Pad the command column rather than hard-coding a run of spaces, so
         // the block still lines up if the executable is renamed.
         //
@@ -512,22 +517,23 @@ namespace newisp {
         out += std::string(optionWidth, ' ') + Tr(Msg::UsageLangBuildSet) + "\n";
         out += std::string(optionWidth, ' ') + Tr(Msg::UsageLangBuildThis) +
             i18n::BuildLanguage() + "\n";
-        out += option("-o, -output LEVEL", Tr(Msg::UsageOutputFlag));
+        out += option("-output LEVEL", Tr(Msg::UsageOutputFlag));
         out += std::string(optionWidth, ' ') + Tr(Msg::UsageOutputLevels) + "\n";
         out += std::string(optionWidth, ' ') + Tr(Msg::UsageOutputDefault) + "\n";
         out += "\n" + Tr(Msg::UsageExamples) + "\n";
-        out += "  " + p + " detect -device /dev/ttyUSB0\n";
-        out += "  " + p + " burn app.hex -d COM7 -F 35M -e 4K\n";
-        out += "  " + p + " burn app.hex -HID         # " +
+        // The example lines are spelled with the options this build accepts, so
+        // they are printed as "# newisp <args>" followed by a translated tag:
+        // the arguments themselves are not prose and are never translated, only
+        // the comment after them is.
+        out += "  # " + base + " detect -d /dev/ttyUSB0\n";
+        out += "  # " + base + " burn app.hex -d COM7 -F 35M -e 4K\n";
+        out += "  # " + base + " burn app.hex -d COM7 -h    # " +
             Tr(Msg::UsageExampleHid) + "\n";
-        out += "  " + p + " inspect app.hex\n";
+        out += "  # " + base + " inspect app.hex\n";
         out += "\n" + Tr(Msg::UsageNotes) + "\n";
-        out += "  " + Tr(Msg::UsageNoteSerial) + "\n";
-        out += "  " + Tr(Msg::UsageNoteSerial2) + "\n";
-        out += "\n";
-        out += "  " + Tr(Msg::UsageNoteHid) + "\n";
-        out += "\n";
-        out += "  " + Tr(Msg::UsageNote8051u) + "\n";
+        out += "  " + Tr(Msg::UsageNoteSerial) + ": " + Tr(Msg::UsageNoteSerialText) + "\n";
+        out += "  " + Tr(Msg::UsageNoteHid) + ": " + Tr(Msg::UsageNoteHidText) + "\n";
+        out += "  " + Tr(Msg::UsageNote8051u) + ": " + Tr(Msg::UsageNote8051uText) + "\n";
         return out;
     }
 
@@ -548,8 +554,9 @@ namespace newisp {
         int i = 2;
 
         // -output is the only output setting, so there is one value to carry
-        // rather than a quiet/verbose pair that could both be true.
-        OutputLevel output = OutputLevel::Normal;
+        // rather than a quiet/verbose pair that could both be true. The
+        // default matches CliOptions: quiet.
+        OutputLevel output = OutputLevel::Quiet;
         bool outputExplicit = false;
 
         // help and version are commands, not options: they stand where list /
@@ -638,13 +645,21 @@ namespace newisp {
                 // left to the positional rules. That matters because
                 // "-s COM7" and "-s app.hex" are both legitimate -- -s followed
                 // by the device or the image -- and neither looks like a rate.
+                //
+                // detect does not take a rate, even though it takes -s: the
+                // handshake it performs runs at a fixed 2400 baud (see
+                // OpenSession), and there is nothing to switch to afterwards.
+                // A number after -s on detect is therefore consumed and
+                // dropped rather than refused -- "-s 921600" is a habit worth
+                // not breaking, and the result is the same either way.
                 out.useHid = false;
                 out.transportExplicit = true;
                 if (i + 1 < argc) {
                     uint32_t rate = 0;
                     if (ParseRate(argv[i + 1], rate)) {
                         ++i;
-                        out.burn.baudRate = rate;
+                        if (out.command != Command::Detect)
+                            out.burn.baudRate = rate;
                     }
                 }
             }

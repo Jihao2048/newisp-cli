@@ -253,12 +253,13 @@ namespace {
             CHECK(!ParseOutputLevel(bad, got));
         }
 
-        // The default is normal, and -output sets the level for a real command.
+        // Without -output the level is quiet: a successful burn prints its
+        // result, not the handshake rounds.
         {
             CliOptions o; std::string e;
             std::vector<const char*> a = { "inspect", "a.hex" };
             CHECK_EQ(Parse(a, o, e), 0);
-            CHECK(o.output == OutputLevel::Normal);
+            CHECK(o.output == OutputLevel::Quiet);
             CHECK(!o.outputExplicit);
         }
         for (const char* cmd : { "quiet", "normal", "verbose" }) {
@@ -413,6 +414,19 @@ namespace {
         for (const char* gone : { "-b", "-baud", "-ba" }) {
             CliOptions o; std::string e;
             CHECK_EQ(Parse(Burn({ gone, "9600" }), o, e), 2);
+        }
+
+        // detect takes -s but no rate: its handshake is a fixed 2400 baud and
+        // never switches, so a number after -s is consumed and dropped rather
+        // than refused or applied.
+        {
+            CliOptions o; std::string e;
+            std::vector<const char*> a = { "detect", "-s", "9600", "-d", "COM7" };
+            CHECK_EQ(Parse(a, o, e), 0);
+            CHECK(!o.useHid);
+            CHECK_STREQ(o.burn.deviceId, "COM7");
+            // Left at the default: detect never uses it.
+            CHECK_EQ(o.burn.baudRate, 115200u);
         }
 
         // -h still wins over -s when both appear: the last transport flag

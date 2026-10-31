@@ -424,8 +424,7 @@ namespace newisp {
             }
 
             // Restore the parity the detected family needs before signing off,
-            // so the chip leaves the ISP monitor in a defined state. The 0xFF
-            // packet is the reset-and-run command.
+            // so the chip leaves the ISP monitor in a defined state.
             bool wantParity = true;
             for (auto& p : probeList) {
                 if (p->Params().name == r.protoName) {
@@ -436,12 +435,27 @@ namespace newisp {
             if (ch->IsOpen() && ch->EvenParity() != wantParity) {
                 ch->SetParity(wantParity);
             }
+
+            // Whether to hand the chip back to its user program depends on the
+            // transport.
+            //
+            // Over serial the 0xFF packet resets and runs, which is the polite
+            // thing to do: the port is about to be closed and nobody is
+            // holding the chip in the monitor. Over USB HID there is no such
+            // reset to give -- the device disappears when the chip leaves the
+            // monitor, so "detect then burn" would fail at the second step
+            // with "no STC USB ISP device". Leaving it in the monitor keeps the
+            // device present and does not break anything: an 8051U sitting in
+            // its ISP monitor is exactly the state a burn wants.
             if (ch->IsOpen()) {
-                auto reset = probeList.empty()
-                    ? std::vector<uint8_t>{}
-                    : probeList.front()->ProbeBuild({ 0xFF });
-                if (!reset.empty()) ch->Write(reset);
+                if (!opts.useHid && !probeList.empty()) {
+                    auto reset = probeList.front()->ProbeBuild({ 0xFF });
+                    if (!reset.empty()) ch->Write(reset);
+                }
                 ch->Close();
+            }
+            if (opts.useHid) {
+                log(Tr(Msg::DetectHidLeftInIsp));
             }
 
             std::string chipName = ChipNameFromTable(r.st.magic);
@@ -568,7 +582,13 @@ namespace newisp {
         }
 
         proto->m_status = st;
-        proto->m_status.userTargetFreq = opts.targetFreq;
+        // Leave the target frequency at 0 when -freq was not given. The
+        // protocol layer reads that as "keep what the chip reported": every
+        // handshake status packet carries the current IRC frequency in clockHz
+        // (see ParseStatus), and ProgramOptions falls back to it. Assigning the
+        // 24 MHz default here instead would silently reprogram an oscillator the
+        // user never asked to change.
+        proto->m_status.userTargetFreq = opts.freqExplicit ? opts.targetFreq : 0;
         proto->m_status.wantExternalClock = opts.clockExternal;
 
         // Families with no selectable frequency (STC10/11/12 and STC89/90) get
@@ -606,17 +626,20 @@ namespace newisp {
             return 1;
         }
 
-        uint32_t targetFreq = opts.targetFreq;
-        if (targetFreq) {
+        uint32_t targetFreq = 0;
+        if (opts.freqExplicit) {
             // Deliberately not clamping a value that is not in the menu: a
             // clamp turns "60 MHz on an 8H" into "45.1584 MHz", which burns
             // option bytes at a speed the user never asked for. Overshooting
             // the ceiling is clamped (and logged); anything else is refused.
-            targetFreq = ResolveFrequency(chipName, targetFreq, log);
+            targetFreq = ResolveFrequency(chipName, opts.targetFreq, log);
             if (targetFreq == 0) {
                 closeCh();
                 return 1;
             }
+        }
+        else {
+            log(Tr(Msg::FreqFromChip, { FormatDouble(st.clockHz / 1e6, 4) }));
         }
         proto->m_status.userTargetFreq = targetFreq;
 

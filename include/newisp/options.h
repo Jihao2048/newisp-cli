@@ -17,8 +17,8 @@ namespace newisp {
     // means the three levels are exhaustive -- there is no state that is both
     // quiet and verbose.
     enum class OutputLevel {
-        Quiet,      // errors, warnings and the final summary only
-        Normal,     // the default: progress lines, no packet dumps
+        Quiet,      // errors, warnings and the final summary only -- the default
+        Normal,     // adds the progress lines
         Verbose,    // adds the raw packet dumps
     };
 
@@ -55,7 +55,11 @@ namespace newisp {
         std::string seriesName;   // -series stc32, etc.
 
         // Log verbosity, consumed by the logger in main.cpp.
-        OutputLevel output = OutputLevel::Normal;
+        //
+        // Quiet is the default: a successful burn should print its result, not
+        // the hundred handshake rounds it took to get there. -output normal or
+        // -output verbose asks for more.
+        OutputLevel output = OutputLevel::Quiet;
         bool        outputExplicit = false;
 
         // There is no language field: the output language is a build-time

@@ -142,7 +142,7 @@ namespace {
         bool Quiet() const { return m_level == newisp::OutputLevel::Quiet; }
 
     private:
-        newisp::OutputLevel m_level = newisp::OutputLevel::Normal;
+        newisp::OutputLevel m_level = newisp::OutputLevel::Quiet;
     };
 
     // Progress goes to stderr so it cannot corrupt redirected stdout, and it
@@ -475,12 +475,11 @@ static int RunMain(const std::vector<std::string>& args)
 #endif
 
     const bool tty = StdoutIsTty();
-    // When stdout is not a terminal the packet dumps would be lost in a log
-    // file anyway, so a redirected run without an explicit -output is treated
-    // as verbose: dumps are cheap to grep and unreadable if dropped.
-    const newisp::OutputLevel level = (!opts.outputExplicit && !tty)
-        ? newisp::OutputLevel::Verbose
-        : opts.output;
+    // The level is exactly what -output asked for, or quiet when it was not
+    // given. A redirected run is NOT upgraded to verbose: "no -output" means
+    // quiet, and a script that wants the handshake trace can say
+    // "-output verbose" explicitly.
+    const newisp::OutputLevel level = opts.output;
     Logger log(level);
     ProgressBar progress(tty && !log.Quiet());
 
@@ -515,7 +514,11 @@ static int RunMain(const std::vector<std::string>& args)
         return 1;
     }
 
-    if (opts.burn.targetFreq)
+    // Only echo settings the user actually gave. The frequency in particular
+    // has a 24 MHz default that is not written when -freq is absent -- the run
+    // keeps whatever the chip reports -- so printing the default would claim a
+    // change that is not going to happen.
+    if (opts.burn.freqExplicit)
         std::cout << newisp::i18n::Tr(newisp::i18n::Msg::TargetFreqLine,
                           newisp::FormatDouble(opts.burn.targetFreq / 1e6, 4)) << '\n';
     if (!useHid)
