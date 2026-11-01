@@ -17,7 +17,6 @@ A cross-platform command-line programmer (flasher) for **STC 8051-family microco
   - [Windows](#windows)
   - [Linux](#linux)
   - [macOS](#macos)
-  - [HID is a hard dependency](#hid-is-a-hard-dependency)
   - [Output language (chosen at build time)](#output-language-chosen-at-build-time)
 - [Encoding note](#encoding-note)
 - [Usage](#usage)
@@ -40,7 +39,6 @@ A cross-platform command-line programmer (flasher) for **STC 8051-family microco
   - [Serial auto-reset](#serial-auto-reset)
 - [Verification status](#verification-status)
   - [Hardware burn test (AI8051U34K64 over USB HID)](#hardware-burn-test-ai8051u34k64-over-usb-hid)
-  - [The 8051U does have a serial ISP monitor](#the-8051u-does-have-a-serial-isp-monitor)
   - [A cross-platform bug that only hardware could expose](#a-cross-platform-bug-that-only-hardware-could-expose)
 - [Known limitations](#known-limitations)
 - [License](#license)
@@ -49,6 +47,9 @@ A cross-platform command-line programmer (flasher) for **STC 8051-family microco
 
 ## Features
 
+- **Bilingual output**: every message, help screen and error string ships in both Chinese and
+  English, and `NEWISP_LANG` picks the table at build time -- there is no locale lookup at run time
+  and no runtime language switch to get wrong.
 - **One code base, three platforms**: Windows, macOS and Linux, built with CMake.
 - **Two transports**: the classic STC serial ISP monitor and the factory USB HID ISP interface.
 - **Automatic identification**: a built-in table of more than 1300 chip IDs, and the protocol is
@@ -82,7 +83,7 @@ A cross-platform command-line programmer (flasher) for **STC 8051-family microco
 | STC8G | STC8G1K08, AI8G1K08, JX8G and relatives; serial and USB HID (the manual does not list USB; the probe decides) |
 | STC8H | STC8H1K08 through STC8H8K64U, AI8H and relatives; serial and USB HID |
 | STC32 | STC32G144K246 and relatives; serial and USB HID, same protocol as the 8051U; images up to 64 KiB |
-| STC8051U | STC8051U34K64, AI8051U34K64 and relatives; serial and USB HID (the manual says "HID only", but the serial monitor answers -- see [below](#the-8051u-does-have-a-serial-isp-monitor)) |
+| STC8051U | STC8051U34K64, AI8051U34K64 and relatives; serial and USB HID|
 
 > **Options are validated per family, not refused wholesale.** The tool no longer rejects a
 > transport or an option on the strength of a family name; it asks whether that family *has* the
@@ -110,10 +111,6 @@ The classic STC ISP monitor. The chip may still be running user code, so the too
 
 `burn` supports 2400 to 460800 bps (STC89 and STC12 stop at 115200 because of their 8-bit BRT
 register). The `detect` handshake is fixed at 2400 bps and **does not use** the number after `-s`.
-
-The vendor manual frames the 8051U family as "USB HID only", and early versions refused it on the
-serial transport for that reason. The refusal is gone: a real 8051U answers on its serial ISP
-monitor (see [below](#the-8051u-does-have-a-serial-isp-monitor)).
 
 ### USB HID
 
@@ -239,17 +236,6 @@ DCD, which a self-powered board never asserts, so the open hangs.
 
 A longer macOS walkthrough (including the command-line tools install) is in
 [`docs/macos-build.md`](docs/macos-build.md).
-
-### HID is a hard dependency
-
-**There is no "build without HID" switch** (`NEWISP_ENABLE_HID` has been removed and
-`NEWISP_HAVE_HID=1` is unconditional). STC32, STC8H and 8051U rely on the USB ISP interface, so a
-build without HID would be a build that cannot program part of the catalogue. Rather than let that
-fail on somebody's bench, it fails at configure time:
-
-- Windows: nothing extra; the system HID class driver is used directly.
-- macOS / Linux: **hidapi is required**. Without it `cmake` stops at `FATAL_ERROR` and names the
-  package to install (`brew install hidapi` / `libhidapi-dev`).
 
 ### Output language (chosen at build time)
 
@@ -732,37 +718,6 @@ baud, and the calibration handshake measured a trim of `67 / 0x20 / 1`.
 All three platforms **read back the identical UID** (`78 B4 C9 28 09 FA 88`), which is evidence that
 the protocol implementation agrees across platforms.
 
-### The 8051U does have a serial ISP monitor
-
-The vendor manual lists the 8051U family as "USB HID only", and early versions of the tool refused
-it on the serial transport for that reason: an 8051U was reported as "please switch to USB HID".
-
-That rule was inherited rather than measured, and **it is wrong**. On an AI8051U34K64 (BSL 7.4U) the
-serial ISP monitor answers the `0x7F` wakeup with a `0x50`-prefixed status packet, the calibration
-handshake completes normally, and the whole sequence runs:
-
-```
-[1/7] handshake succeeded
-[2/7] switched to 115200, trim_adj=90, trim_range=0x20, trim_freq=24031200 Hz
-[3/7] programming prepared
-[4/7] erase complete -> UID 78 B4 C9 28 09 FA 88
-[5/7] 13/13 blocks
-[6/7] option bytes written
-[7/7] burn complete
-```
-
-Re-probing after the burn confirms the option bytes took effect: the status packet reports
-24.031 MHz with the trim triple that was just written.
-
-The restriction has been removed. **The probe decides, not the manual** -- a chip that answers is
-usable; one that does not answer times out on its own and nothing after that step runs. The
-disagreement between manual and measurement is still **reported** (as `[Attention]` and warning
-lines), but it is only a note, no longer a refusal.
-
-Note that the serial and HID status packets are **not laid out identically** (the serial one carries
-a `0x50` prefix and reports different MSR bytes), which is why the two transports had separate
-protocol implementations all along.
-
 ### A cross-platform bug that only hardware could expose
 
 The port had a **cross-platform HID difference** that only real hardware could expose:
@@ -784,8 +739,8 @@ platforms and tolerates future changes in hidapi behaviour.
 ## Known limitations
 
 - **The help text now matches the implementation**: `-freq` no longer claims a 24 MHz default, the
-  no-argument row describes the one-line invite, the closing note states that **every family, the
-  8051U included, can be programmed over the serial ISP monitor**, `-output` no longer offers a
+  no-argument row describes the one-line invite, the closing note states that **every family can be
+  programmed over the serial ISP monitor**, `-output` no longer offers a
   non-existent `-o` short form, and the `list` diagnostic points at `-output verbose` instead of the
   removed `-v`. One English error string in `hex_file.cpp` still says `use inspect -f FILE`; the
   correct form is the positional image, `inspect app.hex`.
